@@ -262,6 +262,8 @@ fun MainScreen(viewModel: MainViewModel) {
                         onToggleWholeWord = viewModel::toggleWholeWord
                     )
                 }
+            }
+        }
     }
 
     if (isSearchVisible) {
