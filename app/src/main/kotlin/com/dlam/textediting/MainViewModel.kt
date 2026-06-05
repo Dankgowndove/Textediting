@@ -3,6 +3,7 @@ package com.dlam.textediting
 import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +59,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _snackbarEvent = MutableSharedFlow<String>()
     val snackbarEvent: SharedFlow<String> = _snackbarEvent.asSharedFlow()
 
+    private val _fileTree = MutableStateFlow(FileTreeState())
+    val fileTree: StateFlow<FileTreeState> = _fileTree.asStateFlow()
+
+    private val _openTabs = MutableStateFlow<List<OpenTab>>(emptyList())
+    val openTabs: StateFlow<List<OpenTab>> = _openTabs.asStateFlow()
+
+    private val _activeTabIndex = MutableStateFlow(-1)
+    val activeTabIndex: StateFlow<Int> = _activeTabIndex.asStateFlow()
+
+    private val _globalSearchQuery = MutableStateFlow("")
+    val globalSearchQuery: StateFlow<String> = _globalSearchQuery.asStateFlow()
+
+    private val _globalSearchResults = MutableStateFlow<List<GlobalSearchResult>>(emptyList())
+    val globalSearchResults: StateFlow<List<GlobalSearchResult>> = _globalSearchResults.asStateFlow()
+
+    private val _isGlobalSearching = MutableStateFlow(false)
+    val isGlobalSearching: StateFlow<Boolean> = _isGlobalSearching.asStateFlow()
+
+    private val _isCaseSensitive = MutableStateFlow(false)
+    val isCaseSensitive: StateFlow<Boolean> = _isCaseSensitive.asStateFlow()
+
+    private val _isWholeWord = MutableStateFlow(false)
+    val isWholeWord: StateFlow<Boolean> = _isWholeWord.asStateFlow()
+
+    private var clipboardUri: Uri? = null
+
     fun openFile(uri: Uri) {
         if (_isLoading.value) return
         _isLoading.value = true
@@ -78,6 +105,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isModified.value = false
                 undoManager.clear()
                 undoManager.record(text)
+                addOrSwitchTab(uri, name, text)
                 _snackbarEvent.emit("已打开：$name")
             } catch (e: Exception) {
                 _snackbarEvent.emit("打开失败：${e.message}")
@@ -230,6 +258,455 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             index = text.indexOf(query, index + 1)
         }
         return positions
+    }
+
+    fun selectRootDir(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val context = getApplication<Application>()
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                _fileTree.value = _fileTree.value.copy(rootUri = uri, isLoading = true)
+                refreshFileTree()
+            } catch (e: Exception) {
+                _snackbarEvent.emit("选择目录失败：${e.message}")
+            }
+        }
+    }
+
+    fun refreshFileTree() {
+        val rootUri = _fileTree.value.rootUri ?: return
+        viewModelScope.launch {
+            _fileTree.value = _fileTree.value.copy(isLoading = true, error = null)
+            try {
+                val nodes = withContext(Dispatchers.IO) {
+                    buildFileTree(rootUri, 0)
+                }
+                _fileTree.value = _fileTree.value.copy(
+                    nodes = nodes, isLoading = false
+                )
+            } catch (e: Exception) {
+                _fileTree.value = _fileTree.value.copy(
+                    isLoading = false, error = e.message
+                )
+            }
+        }
+    }
+
+    private fun buildFileTree(uri: Uri, depth: Int): List<FileNode> {
+        if (depth > 10) return emptyList()
+        val context = getApplication<Application>()
+        val docFile = DocumentFile.fromTreeUri(context, uri)
+            ?: DocumentFile.fromSingleUri(context, uri)
+        if (docFile == null || !docFile.exists()) return emptyList()
+
+        val children = docFile.listFiles().toList()
+        val sorted = children.sortedWith(compareByDescending<DocumentFile> { it.isDirectory }
+            .thenBy { it.name?.lowercase() ?: "" })
+
+        val result = mutableListOf<FileNode>()
+        for (child in sorted) {
+            val name = child.name ?: "未知"
+            result.add(FileNode(
+                uri = child.uri,
+                name = name,
+                isDirectory = child.isDirectory,
+                depth = depth
+            ))
+            if (child.isDirectory && _fileTree.value.expandedUris.contains(child.uri)) {
+                result.addAll(buildFileTree(child.uri, depth + 1))
+            }
+        }
+        return result
+    }
+
+    fun toggleExpandDir(uri: Uri) {
+        val current = _fileTree.value.expandedUris.toMutableSet()
+        if (current.contains(uri)) {
+            current.remove(uri)
+        } else {
+            current.add(uri)
+        }
+        _fileTree.value = _fileTree.value.copy(expandedUris = current)
+        refreshFileTree()
+    }
+
+    fun createFile(parentUri: Uri, name: String) {
+        viewModelScope.launch {
+            try {
+                val docFile = DocumentFile.fromTreeUri(
+                    getApplication(), parentUri
+                ) ?: throw Exception("无法访问目录")
+                val created = withContext(Dispatchers.IO) {
+                    val fileName = if (name.contains('.')) name else "$name.txt"
+                    docFile.createFile("text/plain", fileName)
+                }
+                if (created != null) {
+                    refreshFileTree()
+                    _snackbarEvent.emit("已创建：$name")
+                }
+            } catch (e: Exception) {
+                _snackbarEvent.emit("创建失败：${e.message}")
+            }
+        }
+    }
+
+    fun createFolder(parentUri: Uri, name: String) {
+        viewModelScope.launch {
+            try {
+                val docFile = DocumentFile.fromTreeUri(
+                    getApplication(), parentUri
+                ) ?: throw Exception("无法访问目录")
+                val created = withContext(Dispatchers.IO) {
+                    docFile.createDirectory(name)
+                }
+                if (created != null) {
+                    refreshFileTree()
+                    _snackbarEvent.emit("已创建文件夹：$name")
+                }
+            } catch (e: Exception) {
+                _snackbarEvent.emit("创建失败：${e.message}")
+            }
+        }
+    }
+
+    fun deleteFile(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val docFile = DocumentFile.fromSingleUri(getApplication(), uri)
+                    ?: throw Exception("无法访问文件")
+                val deleted = withContext(Dispatchers.IO) { docFile.delete() }
+                if (deleted) {
+                    val tabs = _openTabs.value.filter { it.uri?.toString() != uri.toString() }
+                    _openTabs.value = tabs
+                    if (_activeTabIndex.value >= tabs.size) {
+                        _activeTabIndex.value = tabs.size - 1
+                    }
+                    refreshFileTree()
+                    _snackbarEvent.emit("已删除")
+                }
+            } catch (e: Exception) {
+                _snackbarEvent.emit("删除失败：${e.message}")
+            }
+        }
+    }
+
+    fun renameFile(uri: Uri, newName: String) {
+        viewModelScope.launch {
+            try {
+                val docFile = DocumentFile.fromSingleUri(getApplication(), uri)
+                    ?: throw Exception("无法访问文件")
+                val renamed = withContext(Dispatchers.IO) { docFile.renameTo(newName) }
+                if (renamed != null) {
+                    refreshFileTree()
+                    _snackbarEvent.emit("已重命名为：$newName")
+                }
+            } catch (e: Exception) {
+                _snackbarEvent.emit("重命名失败：${e.message}")
+            }
+        }
+    }
+
+    fun copyFileToClipboard(uri: Uri) {
+        clipboardUri = uri
+        _snackbarEvent.emit("已复制")
+    }
+
+    fun pasteFile(targetDirUri: Uri) {
+        val sourceUri = clipboardUri ?: return
+        viewModelScope.launch {
+            try {
+                val context = getApplication<Application>()
+                val sourceDoc = DocumentFile.fromSingleUri(context, sourceUri)
+                    ?: throw Exception("无法读取源文件")
+                val targetDir = DocumentFile.fromTreeUri(context, targetDirUri)
+                    ?: throw Exception("无法访问目标目录")
+
+                withContext(Dispatchers.IO) {
+                    val name = sourceDoc.name ?: "未命名"
+                    val newFile = targetDir.createFile("text/plain", name)
+                    if (newFile != null) {
+                        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                            context.contentResolver.openOutputStream(newFile.uri, "wt")?.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
+                refreshFileTree()
+                _snackbarEvent.emit("已粘贴")
+            } catch (e: Exception) {
+                _snackbarEvent.emit("粘贴失败：${e.message}")
+            }
+        }
+    }
+
+    fun addOrSwitchTab(uri: Uri?, fileName: String, content: String) {
+        val tabs = _openTabs.value.toMutableList()
+        val existingIdx = if (uri != null) {
+            tabs.indexOfFirst { it.uri?.toString() == uri.toString() }
+        } else -1
+
+        if (existingIdx >= 0) {
+            _activeTabIndex.value = existingIdx
+            if (tabs[existingIdx].uri != null) {
+                switchToTab(existingIdx)
+            }
+        } else {
+            if (tabs.size >= 10) {
+                val oldestUnmodified = tabs.indexOfFirst { !it.isModified }
+                if (oldestUnmodified >= 0) {
+                    tabs.removeAt(oldestUnmodified)
+                } else {
+                    _snackbarEvent.emit("已达最大标签数（10）")
+                    return
+                }
+            }
+            tabs.add(OpenTab(
+                uri = uri,
+                fileName = fileName,
+                content = content,
+                savedText = content
+            ))
+            _openTabs.value = tabs
+            _activeTabIndex.value = tabs.size - 1
+        }
+    }
+
+    fun switchToTab(index: Int) {
+        val tabs = _openTabs.value
+        if (index < 0 || index >= tabs.size) return
+        val currentActive = _activeTabIndex.value
+        if (currentActive in tabs.indices) {
+            val current = tabs[currentActive]
+            _openTabs.value = tabs.toMutableList().apply {
+                this[currentActive] = current.copy(
+                    content = _textContent.value,
+                    isModified = _isModified.value,
+                    savedText = savedText
+                )
+            }
+        }
+        val target = _openTabs.value[index]
+        _fileName.value = target.fileName
+        _currentUri.value = target.uri
+        _textContent.value = target.content
+        savedText = target.savedText
+        _isModified.value = target.isModified
+        _activeTabIndex.value = index
+        undoManager.clear()
+        undoManager.record(target.content)
+    }
+
+    fun closeTab(index: Int) {
+        val tabs = _openTabs.value.toMutableList()
+        if (index < 0 || index >= tabs.size) return
+        tabs.removeAt(index)
+        _openTabs.value = tabs
+        if (tabs.isEmpty()) {
+            _fileName.value = ""
+            _currentUri.value = null
+            _textContent.value = ""
+            savedText = ""
+            _isModified.value = false
+            _activeTabIndex.value = -1
+            undoManager.clear()
+        } else {
+            val newIdx = if (index < tabs.size) index else tabs.size - 1
+            switchToTab(newIdx)
+        }
+    }
+
+    fun moveTab(fromIndex: Int, toIndex: Int) {
+        val tabs = _openTabs.value.toMutableList()
+        if (fromIndex < 0 || fromIndex >= tabs.size) return
+        if (toIndex < 0 || toIndex >= tabs.size) return
+        val item = tabs.removeAt(fromIndex)
+        tabs.add(toIndex, item)
+        _openTabs.value = tabs
+        if (_activeTabIndex.value == fromIndex) {
+            _activeTabIndex.value = toIndex
+        }
+    }
+
+    fun toggleCaseSensitive() {
+        _isCaseSensitive.value = !_isCaseSensitive.value
+        if (_searchQuery.value.isNotEmpty()) performSearch(_searchQuery.value)
+    }
+
+    fun toggleWholeWord() {
+        _isWholeWord.value = !_isWholeWord.value
+        if (_searchQuery.value.isNotEmpty()) performSearch(_searchQuery.value)
+    }
+
+    fun performSearch(query: String) {
+        val text = _textContent.value
+        if (query.isEmpty()) {
+            _searchMatchCount.value = 0
+            _currentSearchIndex.value = -1
+            _searchPositions.value = emptyList()
+            return
+        }
+        val positions = mutableListOf<Int>()
+        val searchText = if (_isCaseSensitive.value) text else text.lowercase()
+        val searchQuery = if (_isCaseSensitive.value) query else query.lowercase()
+        var index = searchText.indexOf(searchQuery, 0)
+        while (index >= 0) {
+            if (_isWholeWord.value) {
+                val before = if (index > 0) searchText[index - 1] else ' '
+                val after = if (index + query.length < searchText.length) searchText[index + query.length] else ' '
+                if (before.isLetterOrDigit() || after.isLetterOrDigit()) {
+                    index = searchText.indexOf(searchQuery, index + 1)
+                    continue
+                }
+            }
+            positions.add(index)
+            index = searchText.indexOf(searchQuery, index + 1)
+        }
+        _searchPositions.value = positions
+        _searchMatchCount.value = positions.size
+        _currentSearchIndex.value = if (positions.isNotEmpty()) 0 else -1
+    }
+
+    fun startGlobalSearch(query: String) {
+        if (query.isBlank()) return
+        val rootUri = _fileTree.value.rootUri ?: return
+        _globalSearchQuery.value = query
+        _isGlobalSearching.value = true
+        _globalSearchResults.value = emptyList()
+        viewModelScope.launch {
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    val found = mutableListOf<GlobalSearchResult>()
+                    searchInDir(rootUri, query, found, 0)
+                    found
+                }
+                _globalSearchResults.value = results
+            } catch (e: Exception) {
+                _snackbarEvent.emit("搜索出错：${e.message}")
+            } finally {
+                _isGlobalSearching.value = false
+            }
+        }
+    }
+
+    private fun searchInDir(dirUri: Uri, query: String, results: MutableList<GlobalSearchResult>, depth: Int) {
+        if (depth > 10 || results.size >= 500) return
+        val context = getApplication<Application>()
+        val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return
+        val children = dir.listFiles()
+        val textExtensions = setOf("txt", "md", "json", "xml", "csv", "ini", "cfg", "log", "yml", "yaml", "java", "kt", "xml", "html", "css", "js", "ts", "py", "sh", "bat", "properties")
+        for (child in children) {
+            if (results.size >= 500) break
+            if (child.isDirectory) {
+                searchInDir(child.uri, query, results, depth + 1)
+            } else {
+                val name = child.name ?: continue
+                val ext = name.substringAfterLast('.', "").lowercase()
+                if (ext !in textExtensions) continue
+                try {
+                    context.contentResolver.openInputStream(child.uri)?.use { input ->
+                        val reader = BufferedReader(InputStreamReader(input, Charsets.UTF_8))
+                        var lineNum = 0
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            val l = line ?: continue
+                            lineNum++
+                            val matchIdx = l.indexOf(query, ignoreCase = true)
+                            if (matchIdx >= 0) {
+                                results.add(GlobalSearchResult(
+                                    fileUri = child.uri,
+                                    fileName = name,
+                                    lineNumber = lineNum,
+                                    lineContent = l.trim(),
+                                    matchStart = matchIdx
+                                ))
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun openFileFromGlobalSearch(uri: Uri) {
+        val fileName = getFileName(uri)
+        openFile(uri)
+    }
+
+    fun performGlobalReplace(find: String, replace: String, onlyCurrentFile: Boolean) {
+        if (find.isBlank()) return
+        viewModelScope.launch {
+            try {
+                if (onlyCurrentFile) {
+                    val uri = _currentUri.value ?: return@launch
+                    val newContent = _textContent.value.replace(find, replace, ignoreCase = true)
+                    withContext(Dispatchers.IO) {
+                        val context = getApplication<Application>()
+                        context.contentResolver.openOutputStream(uri, "wt")?.use { os ->
+                            os.write(newContent.toByteArray(Charsets.UTF_8))
+                        }
+                    }
+                    _textContent.value = newContent
+                    savedText = newContent
+                    _isModified.value = false
+                    val tabs = _openTabs.value.toMutableList()
+                    val idx = tabs.indexOfFirst { it.uri?.toString() == uri.toString() }
+                    if (idx >= 0) {
+                        tabs[idx] = tabs[idx].copy(content = newContent, savedText = newContent, isModified = false)
+                        _openTabs.value = tabs
+                    }
+                    _snackbarEvent.emit("替换完成")
+                } else {
+                    val rootUri = _fileTree.value.rootUri ?: return@launch
+                    val context = getApplication<Application>()
+                    withContext(Dispatchers.IO) {
+                        replaceInDir(rootUri, find, replace, context, 0)
+                    }
+                    refreshFileTree()
+                    val currentContent = _textContent.value
+                    val newContent = currentContent.replace(find, replace, ignoreCase = true)
+                    if (newContent != currentContent) {
+                        _textContent.value = newContent
+                        savedText = newContent
+                        _isModified.value = false
+                    }
+                    _snackbarEvent.emit("全部替换完成")
+                }
+            } catch (e: Exception) {
+                _snackbarEvent.emit("替换失败：${e.message}")
+            }
+        }
+    }
+
+    private fun replaceInDir(dirUri: Uri, find: String, replace: String, context: Application, depth: Int) {
+        if (depth > 10) return
+        val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return
+        val children = dir.listFiles()
+        val textExtensions = setOf("txt", "md", "json", "xml", "csv", "ini", "cfg", "log", "yml", "yaml", "java", "kt", "xml", "html", "css", "js", "ts", "py", "sh", "bat", "properties")
+        for (child in children) {
+            if (child.isDirectory) {
+                replaceInDir(child.uri, find, replace, context, depth + 1)
+            } else {
+                val name = child.name ?: continue
+                val ext = name.substringAfterLast('.', "").lowercase()
+                if (ext !in textExtensions) continue
+                try {
+                    context.contentResolver.openInputStream(child.uri)?.use { input ->
+                        val text = BufferedReader(InputStreamReader(input, Charsets.UTF_8)).readText()
+                        val newText = text.replace(find, replace, ignoreCase = true)
+                        if (newText != text) {
+                            context.contentResolver.openOutputStream(child.uri, "wt")?.use { os ->
+                                os.write(newText.toByteArray(Charsets.UTF_8))
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun getFileName(uri: Uri): String {

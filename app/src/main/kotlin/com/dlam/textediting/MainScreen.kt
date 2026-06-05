@@ -16,9 +16,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
@@ -38,14 +43,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 
@@ -63,9 +71,14 @@ fun MainScreen(viewModel: MainViewModel) {
     val currentUri by viewModel.currentUri.collectAsState()
     val lineCount by remember { derivedStateOf { content.lines().size } }
     val charCount by remember { derivedStateOf { content.length } }
+    val openTabs by viewModel.openTabs.collectAsState()
+    val activeTabIndex by viewModel.activeTabIndex.collectAsState()
+    val isCaseSensitive by viewModel.isCaseSensitive.collectAsState()
+    val isWholeWord by viewModel.isWholeWord.collectAsState()
 
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     var showStatsDialog by remember { mutableStateOf(false) }
     var showGoToLineDialog by remember { mutableStateOf(false) }
@@ -82,10 +95,173 @@ fun MainScreen(viewModel: MainViewModel) {
         contract = ActivityResultContracts.CreateDocument("text/plain")
     ) { uri -> uri?.let { viewModel.saveAs(it) } }
 
+    val scope = rememberCoroutineScope()
+
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
+    }
+
+    if (isSearchVisible) {
+        BackHandler(onBack = viewModel::dismissSearch)
+    }
+
+    val isFileOpen = openTabs.isNotEmpty() || currentUri != null || content.isNotEmpty() || fileName.isNotEmpty()
+    val title = when {
+        fileName.isEmpty() -> "文本编辑器"
+        else -> fileName + if (isModified) "  \u25CF" else ""
+    }
+
+    fun scrollToSearchMatch() {
+        val pos = viewModel.getSearchPosition() ?: return
+        editTextRef.value?.let { et ->
+            et.setSelection(pos.first, pos.first + pos.second)
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                FileTreeSidebar(
+                    viewModel = viewModel,
+                    onClose = { scope.launch { drawerState.close() } }
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
+                    title = { Text(title, maxLines = 1) },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "菜单")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    actions = {
+                        if (isFileOpen) {
+                            Row(
+                                Modifier.horizontalScroll(rememberScrollState()),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(onClick = { viewModel.toggleSearch() }) {
+                                    Icon(Icons.Filled.Search, contentDescription = "搜索")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val et = editTextRef.value ?: return@IconButton
+                                        val result = viewModel.undoManager.prepareUndo()
+                                        if (result != null) {
+                                            try {
+                                                et.setText(result)
+                                            } finally {
+                                                viewModel.undoManager.finishUndoRedo()
+                                            }
+                                        }
+                                    },
+                                    enabled = viewModel.canUndo
+                                ) {
+                                    Icon(Icons.Filled.Undo, contentDescription = "撤销")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val et = editTextRef.value ?: return@IconButton
+                                        val result = viewModel.undoManager.prepareRedo()
+                                        if (result != null) {
+                                            try {
+                                                et.setText(result)
+                                            } finally {
+                                                viewModel.undoManager.finishUndoRedo()
+                                            }
+                                        }
+                                    },
+                                    enabled = viewModel.canRedo
+                                ) {
+                                    Icon(Icons.Filled.Redo, contentDescription = "重做")
+                                }
+                                IconButton(onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val lines = content.lines()
+                                    val sb = StringBuilder(lines.size * 8)
+                                    for (i in lines.indices) sb.append(i + 1).append('\n')
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
+                                }) {
+                                    Icon(Icons.Filled.ContentCopy, contentDescription = "复制行号")
+                                }
+                                IconButton(onClick = { showGoToLineDialog = true }) {
+                                    Icon(Icons.Filled.Numbers, contentDescription = "跳转到行")
+                                }
+                                IconButton(onClick = {
+                                    showStatsDialog = true
+                                    isStatsLoading = true
+                                    statsResult = null
+                                }) {
+                                    Icon(Icons.Filled.BarChart, contentDescription = "统计")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (currentUri != null) {
+                                            viewModel.saveFile()
+                                        } else {
+                                            saveAsLauncher.launch("new_file.txt")
+                                        }
+                                    },
+                                    enabled = isModified
+                                ) {
+                                    Icon(Icons.Filled.Save, contentDescription = "保存")
+                                }
+                            }
+                        } else {
+                            IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
+                                Icon(Icons.Filled.Add, contentDescription = "打开文件")
+                            }
+                        }
+                    }
+                )
+            }
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                if (openTabs.isNotEmpty()) {
+                    TabBar(
+                        tabs = openTabs,
+                        activeIndex = activeTabIndex,
+                        onTabClick = { idx -> viewModel.switchToTab(idx) },
+                        onTabClose = { idx -> viewModel.closeTab(idx) },
+                        onTabMove = { from, to -> viewModel.moveTab(from, to) }
+                    )
+                }
+
+                AnimatedVisibility(visible = isSearchVisible) {
+                    SearchBar(
+                        query = searchQuery,
+                        onQueryChange = viewModel::onSearchQueryChanged,
+                        matchCount = searchMatchCount,
+                        currentIndex = currentSearchIndex,
+                        onPrevious = {
+                            viewModel.searchPrevious()
+                            scrollToSearchMatch()
+                        },
+                        onNext = {
+                            viewModel.searchNext()
+                            scrollToSearchMatch()
+                        },
+                        onClose = viewModel::dismissSearch,
+                        isCaseSensitive = isCaseSensitive,
+                        isWholeWord = isWholeWord,
+                        onToggleCaseSensitive = viewModel::toggleCaseSensitive,
+                        onToggleWholeWord = viewModel::toggleWholeWord
+                    )
+                }
     }
 
     if (isSearchVisible) {
@@ -321,51 +497,166 @@ private fun SearchBar(
     currentIndex: Int,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    isCaseSensitive: Boolean = false,
+    isWholeWord: Boolean = false,
+    onToggleCaseSensitive: () -> Unit = {},
+    onToggleWholeWord: () -> Unit = {}
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            Icons.Filled.Search,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(8.dp))
-        TextField(
-            value = query,
-            onValueChange = onQueryChange,
-            placeholder = { Text("搜索...") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                focusedIndicatorColor = MaterialTheme.colorScheme.primary,
-                unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        )
-        if (query.isNotEmpty()) {
-            val displayIndex = if (matchCount > 0) currentIndex + 1 else 0
-            Text(
-                text = "$displayIndex/$matchCount",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp)
+            Spacer(Modifier.width(8.dp))
+            TextField(
+                value = query,
+                onValueChange = onQueryChange,
+                placeholder = { Text("搜索...") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                    unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
+                )
             )
-            IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上一个")
+            if (query.isNotEmpty()) {
+                val displayIndex = if (matchCount > 0) currentIndex + 1 else 0
+                Text(
+                    text = "$displayIndex/$matchCount",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上一个")
+                }
+                IconButton(onClick = onNext, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下一个")
+                }
             }
-            IconButton(onClick = onNext, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下一个")
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = "关闭搜索")
             }
         }
-        IconButton(onClick = onClose) {
-            Icon(Icons.Filled.Close, contentDescription = "关闭搜索")
+        if (query.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = isCaseSensitive,
+                    onClick = onToggleCaseSensitive,
+                    label = { Text("Aa", style = MaterialTheme.typography.bodySmall) },
+                    leadingIcon = if (isCaseSensitive) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    modifier = Modifier.height(28.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                FilterChip(
+                    selected = isWholeWord,
+                    onClick = onToggleWholeWord,
+                    label = { Text("全字", style = MaterialTheme.typography.bodySmall) },
+                    leadingIcon = if (isWholeWord) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    modifier = Modifier.height(28.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabBar(
+    tabs: List<OpenTab>,
+    activeIndex: Int,
+    onTabClick: (Int) -> Unit,
+    onTabClose: (Int) -> Unit,
+    onTabMove: (Int, Int) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            itemsIndexed(tabs, key = { idx, _ -> idx }) { index, tab ->
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                        .clickable { onTabClick(index) },
+                    color = if (index == activeIndex) MaterialTheme.colorScheme.surface
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                    tonalElevation = if (index == activeIndex) 2.dp else 0.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (tab.isModified) Icons.Filled.Circle else Icons.Filled.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (tab.isModified) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = tab.fileName,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 120.dp)
+                        )
+                        IconButton(
+                            onClick = { onTabClose(index) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "关闭",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            if (tabs.size >= 10) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .height(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "已达上限",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
         }
     }
 }
