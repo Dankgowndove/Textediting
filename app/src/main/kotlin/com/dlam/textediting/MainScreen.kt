@@ -8,15 +8,20 @@ import android.graphics.Paint
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
@@ -110,71 +115,76 @@ fun MainScreen(viewModel: MainViewModel) {
                 ),
                 actions = {
                     if (isFileOpen) {
-                        IconButton(onClick = { viewModel.toggleSearch() }) {
-                            Icon(Icons.Filled.Search, contentDescription = "搜索")
-                        }
-                        IconButton(
-                            onClick = {
-                                val et = editTextRef.value ?: return@IconButton
-                                val result = viewModel.undoManager.prepareUndo()
-                                if (result != null) {
-                                    try {
-                                        et.setText(result)
-                                    } finally {
-                                        viewModel.undoManager.finishUndoRedo()
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { viewModel.toggleSearch() }) {
+                                Icon(Icons.Filled.Search, contentDescription = "搜索")
+                            }
+                            IconButton(
+                                onClick = {
+                                    val et = editTextRef.value ?: return@IconButton
+                                    val result = viewModel.undoManager.prepareUndo()
+                                    if (result != null) {
+                                        try {
+                                            et.setText(result)
+                                        } finally {
+                                            viewModel.undoManager.finishUndoRedo()
+                                        }
                                     }
-                                }
-                            },
-                            enabled = viewModel.canUndo
-                        ) {
-                            Icon(Icons.Filled.Undo, contentDescription = "撤销")
-                        }
-                        IconButton(
-                            onClick = {
-                                val et = editTextRef.value ?: return@IconButton
-                                val result = viewModel.undoManager.prepareRedo()
-                                if (result != null) {
-                                    try {
-                                        et.setText(result)
-                                    } finally {
-                                        viewModel.undoManager.finishUndoRedo()
+                                },
+                                enabled = viewModel.canUndo
+                            ) {
+                                Icon(Icons.Filled.Undo, contentDescription = "撤销")
+                            }
+                            IconButton(
+                                onClick = {
+                                    val et = editTextRef.value ?: return@IconButton
+                                    val result = viewModel.undoManager.prepareRedo()
+                                    if (result != null) {
+                                        try {
+                                            et.setText(result)
+                                        } finally {
+                                            viewModel.undoManager.finishUndoRedo()
+                                        }
                                     }
-                                }
-                            },
-                            enabled = viewModel.canRedo
-                        ) {
-                            Icon(Icons.Filled.Redo, contentDescription = "重做")
-                        }
-                        IconButton(onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val lines = content.lines()
-                            val sb = StringBuilder(lines.size * 8)
-                            for (i in lines.indices) sb.append(i + 1).append('\n')
-                            clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
-                        }) {
-                            Icon(Icons.Filled.ContentCopy, contentDescription = "复制行号")
-                        }
-                        IconButton(onClick = { showGoToLineDialog = true }) {
-                            Icon(Icons.Filled.Numbers, contentDescription = "跳转到行")
-                        }
-                        IconButton(onClick = {
-                            showStatsDialog = true
-                            isStatsLoading = true
-                            statsResult = null
-                        }) {
-                            Icon(Icons.Filled.BarChart, contentDescription = "统计")
-                        }
-                        IconButton(
-                            onClick = {
-                                if (currentUri != null) {
-                                    viewModel.saveFile()
-                                } else {
-                                    saveAsLauncher.launch("new_file.txt")
-                                }
-                            },
-                            enabled = isModified
-                        ) {
-                            Icon(Icons.Filled.Save, contentDescription = "保存")
+                                },
+                                enabled = viewModel.canRedo
+                            ) {
+                                Icon(Icons.Filled.Redo, contentDescription = "重做")
+                            }
+                            IconButton(onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val lines = content.lines()
+                                val sb = StringBuilder(lines.size * 8)
+                                for (i in lines.indices) sb.append(i + 1).append('\n')
+                                clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
+                            }) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = "复制行号")
+                            }
+                            IconButton(onClick = { showGoToLineDialog = true }) {
+                                Icon(Icons.Filled.Numbers, contentDescription = "跳转到行")
+                            }
+                            IconButton(onClick = {
+                                showStatsDialog = true
+                                isStatsLoading = true
+                                statsResult = null
+                            }) {
+                                Icon(Icons.Filled.BarChart, contentDescription = "统计")
+                            }
+                            IconButton(
+                                onClick = {
+                                    if (currentUri != null) {
+                                        viewModel.saveFile()
+                                    } else {
+                                        saveAsLauncher.launch("new_file.txt")
+                                    }
+                                },
+                                enabled = isModified
+                            ) {
+                                Icon(Icons.Filled.Save, contentDescription = "保存")
+                            }
                         }
                     } else {
                         IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
@@ -245,7 +255,6 @@ fun MainScreen(viewModel: MainViewModel) {
                                 et.hint = "在此输入文本..."
                                 et.setHorizontallyScrolling(false)
                                 et.maxLines = Integer.MAX_VALUE
-                                et.imeOptions = EditorInfo.IME_FLAG_NO_ENTER_ACTION
 
                                 et.addTextChangedListener(object : TextWatcher {
                                     override fun beforeTextChanged(
@@ -262,11 +271,14 @@ fun MainScreen(viewModel: MainViewModel) {
                                 })
 
                                 editTextRef.value = et
+                                et.requestFocus()
                             }
                         },
                         update = { et ->
                             if (et.text?.toString() != content) {
+                                val hadFocus = et.hasFocus()
                                 et.setText(content)
+                                if (hadFocus) et.requestFocus()
                             }
                         },
                         modifier = Modifier.fillMaxSize()
@@ -592,6 +604,17 @@ class LinedEditText(
             paddingRight,
             paddingBottom
         )
+        isFocusable = true
+        isFocusableInTouchMode = true
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_DOWN) {
+            requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        }
+        return super.onTouchEvent(event)
     }
 
     fun scrollToLine(line: Int) {
@@ -613,17 +636,14 @@ class LinedEditText(
         canvas.drawRect(0f, 0f, gutterWidthPx, height.toFloat(), gutterBgPaint)
         canvas.drawLine(gutterWidthPx, 0f, gutterWidthPx, height.toFloat(), gutterDividerPaint)
 
-        val firstVisible = maxOf(0, layout.getLineForVertical(scrollY))
-        val lastVisible = minOf(layout.lineCount - 1, layout.getLineForVertical(scrollY + viewHeight))
+        val firstVisibleLine = maxOf(0, layout.getLineForVertical(scrollY))
+        val lastVisibleLine = minOf(layout.lineCount - 1, layout.getLineForVertical(scrollY + viewHeight))
 
-        val sy = scrollY.toFloat()
-        val pt = paddingTop.toFloat()
-
-        for (line in firstVisible..lastVisible) {
+        for (line in firstVisibleLine..lastVisibleLine) {
             canvas.drawText(
                 (line + 1).toString(),
                 gutterWidthPx - gutterMarginPx,
-                layout.getLineBaseline(line).toFloat() - sy + pt,
+                layout.getLineBaseline(line).toFloat() - scrollY.toFloat() + paddingTop.toFloat(),
                 lineNumberPaint
             )
         }
