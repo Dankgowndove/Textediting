@@ -1,36 +1,54 @@
 package com.dlam.textediting
 
-class UndoManager(private val maxHistory: Int = 100) {
-    private val undoStack = mutableListOf<String>()
-    private val redoStack = mutableListOf<String>()
+/**
+ * Undo/Redo manager with unified history + index pointer.
+ * 
+ * Thread-safe for main-thread-only use: TextWatcher.afterTextChanged fires
+ * synchronously during setText(), so the isUndoingRedoing flag protects
+ * against re-recording during undo/redo.
+ */
+class UndoManager(private val maxHistory: Int = 200) {
+    private val history = mutableListOf<String>()
+    private var index = -1
+    private var isUndoingRedoing = false
 
-    fun saveState(text: String) {
-        if (undoStack.lastOrNull() != text) {
-            undoStack.add(text)
-            if (undoStack.size > maxHistory) {
-                undoStack.removeFirst()
-            }
+    val canUndo: Boolean get() = index > 0
+    val canRedo: Boolean get() = index < history.size - 1
+
+    fun record(text: String) {
+        if (isUndoingRedoing) return
+        if (index >= 0 && history[index] == text) return
+        while (history.size > index + 1) {
+            history.removeAt(history.lastIndex)
         }
-        redoStack.clear()
+        history.add(text)
+        if (history.size > maxHistory) {
+            history.removeAt(0)
+        }
+        index = history.size - 1
     }
 
-    fun undo(currentText: String): String? {
-        if (undoStack.isEmpty()) return null
-        redoStack.add(currentText)
-        return undoStack.removeLast()
+    fun prepareUndo(): String? {
+        if (index <= 0) return null
+        isUndoingRedoing = true
+        index--
+        return history[index]
     }
 
-    fun redo(currentText: String): String? {
-        if (redoStack.isEmpty()) return null
-        undoStack.add(currentText)
-        return redoStack.removeLast()
+    fun prepareRedo(): String? {
+        if (index >= history.size - 1) return null
+        isUndoingRedoing = true
+        index++
+        return history[index]
+    }
+
+    fun finishUndoRedo() {
+        isUndoingRedoing = false
     }
 
     fun clear() {
-        undoStack.clear()
-        redoStack.clear()
+        history.clear()
+        index = -1
+        isUndoingRedoing = false
     }
-
-    val canUndo: Boolean get() = undoStack.isNotEmpty()
-    val canRedo: Boolean get() = redoStack.isNotEmpty()
 }

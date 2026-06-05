@@ -3,13 +3,8 @@ package com.dlam.textediting
 import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -23,8 +18,8 @@ import java.io.InputStreamReader
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _textFieldValue = MutableStateFlow(TextFieldValue(""))
-    val textFieldValue: StateFlow<TextFieldValue> = _textFieldValue.asStateFlow()
+    private val _textContent = MutableStateFlow("")
+    val textContent: StateFlow<String> = _textContent.asStateFlow()
 
     private val _isModified = MutableStateFlow(false)
     val isModified: StateFlow<Boolean> = _isModified.asStateFlow()
@@ -50,8 +45,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentSearchIndex = MutableStateFlow(-1)
     val currentSearchIndex: StateFlow<Int> = _currentSearchIndex.asStateFlow()
 
-    private val undoManager = UndoManager()
-    private var autoSaveJob: Job? = null
+    private val _searchPositions = MutableStateFlow<List<Int>>(emptyList())
+    val searchPositions: StateFlow<List<Int>> = _searchPositions.asStateFlow()
+
+    val undoManager = UndoManager()
     private var savedText: String = ""
 
     val canUndo: Boolean get() = undoManager.canUndo
@@ -75,11 +72,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _fileName.value = name
                 _currentUri.value = uri
-                _textFieldValue.value = TextFieldValue(text)
+                _textContent.value = text
                 savedText = text
                 _isModified.value = false
                 undoManager.clear()
-                undoManager.saveState(text)
+                undoManager.record(text)
                 _snackbarEvent.emit("已打开：$name")
             } catch (e: Exception) {
                 _snackbarEvent.emit("打开失败：${e.message}")
@@ -92,50 +89,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun createNewFile() {
         _fileName.value = "无标题"
         _currentUri.value = null
-        _textFieldValue.value = TextFieldValue("")
+        _textContent.value = ""
         savedText = ""
         _isModified.value = false
         undoManager.clear()
-        undoManager.saveState("")
+        undoManager.record("")
     }
 
-    fun onTextChanged(newValue: TextFieldValue) {
-        _textFieldValue.value = newValue
-        _isModified.value = newValue.text != savedText
-        scheduleAutoSave()
-    }
-
-    private fun scheduleAutoSave() {
-        autoSaveJob?.cancel()
-        autoSaveJob = viewModelScope.launch {
-            delay(500)
-            undoManager.saveState(_textFieldValue.value.text)
-        }
-    }
-
-    fun undo() {
-        autoSaveJob?.cancel()
-        val currentText = _textFieldValue.value.text
-        undoManager.undo(currentText)?.let { text ->
-            _textFieldValue.value = TextFieldValue(text)
-            _isModified.value = text != savedText
-        }
-    }
-
-    fun redo() {
-        autoSaveJob?.cancel()
-        val currentText = _textFieldValue.value.text
-        undoManager.redo(currentText)?.let { text ->
-            _textFieldValue.value = TextFieldValue(text)
-            _isModified.value = text != savedText
-        }
+    fun onTextChanged(newText: String) {
+        _textContent.value = newText
+        _isModified.value = newText != savedText
+        undoManager.record(newText)
     }
 
     fun saveFile() {
         viewModelScope.launch {
             val uri = _currentUri.value ?: return@launch
             try {
-                val text = _textFieldValue.value.text
+                val text = _textContent.value
                 withContext(Dispatchers.IO) {
                     val context = getApplication<Application>()
                     context.contentResolver.openOutputStream(uri, "wt")?.use { os ->
@@ -154,7 +125,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveAs(uri: Uri) {
         viewModelScope.launch {
             try {
-                val text = _textFieldValue.value.text
+                val text = _textContent.value
                 val name = withContext(Dispatchers.IO) {
                     val context = getApplication<Application>()
                     context.contentResolver.openOutputStream(uri, "wt")?.use { os ->
@@ -185,6 +156,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = ""
         _searchMatchCount.value = 0
         _currentSearchIndex.value = -1
+        _searchPositions.value = emptyList()
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -193,10 +165,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun performSearch(query: String) {
-        val text = _textFieldValue.value.text
+        val text = _textContent.value
         if (query.isEmpty()) {
             _searchMatchCount.value = 0
             _currentSearchIndex.value = -1
+            _searchPositions.value = emptyList()
             return
         }
         val positions = mutableListOf<Int>()
@@ -205,35 +178,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             positions.add(index)
             index = text.indexOf(query, index + 1)
         }
+        _searchPositions.value = positions
         _searchMatchCount.value = positions.size
-        if (positions.isNotEmpty()) {
-            _currentSearchIndex.value = 0
-            jumpTo(positions[0], query.length)
-        } else {
-            _currentSearchIndex.value = -1
-        }
+        _currentSearchIndex.value = if (positions.isNotEmpty()) 0 else -1
+    }
+
+    fun getSearchPosition(): Pair<Int, Int>? {
+        val positions = _searchPositions.value
+        val query = _searchQuery.value
+        val idx = _currentSearchIndex.value
+        if (positions.isEmpty() || query.isEmpty() || idx < 0) return null
+        return Pair(positions[idx], query.length)
     }
 
     fun searchNext() {
         val query = _searchQuery.value
         if (query.isEmpty()) return
-        val text = _textFieldValue.value.text
+        val text = _textContent.value
         val positions = findAllPositions(text, query)
-        if (positions.isEmpty()) return
+        _searchPositions.value = positions
+        _searchMatchCount.value = positions.size
+        if (positions.isEmpty()) {
+            _currentSearchIndex.value = -1
+            return
+        }
         val next = (_currentSearchIndex.value + 1) % positions.size
         _currentSearchIndex.value = next
-        jumpTo(positions[next], query.length)
     }
 
     fun searchPrevious() {
         val query = _searchQuery.value
         if (query.isEmpty()) return
-        val text = _textFieldValue.value.text
+        val text = _textContent.value
         val positions = findAllPositions(text, query)
-        if (positions.isEmpty()) return
+        _searchPositions.value = positions
+        _searchMatchCount.value = positions.size
+        if (positions.isEmpty()) {
+            _currentSearchIndex.value = -1
+            return
+        }
         val prev = if (_currentSearchIndex.value > 0) _currentSearchIndex.value - 1 else positions.size - 1
         _currentSearchIndex.value = prev
-        jumpTo(positions[prev], query.length)
     }
 
     private fun findAllPositions(text: String, query: String): List<Int> {
@@ -244,11 +229,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             index = text.indexOf(query, index + 1)
         }
         return positions
-    }
-
-    private fun jumpTo(start: Int, length: Int) {
-        val current = _textFieldValue.value
-        _textFieldValue.value = current.copy(selection = TextRange(start, start + length))
     }
 
     private fun getFileName(uri: Uri): String {
