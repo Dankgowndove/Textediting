@@ -337,6 +337,7 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
     }
+    }
 
     if (showGoToLineDialog) {
         GoToLineDialog(

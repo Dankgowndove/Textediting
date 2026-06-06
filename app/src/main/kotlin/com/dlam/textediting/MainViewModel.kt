@@ -499,7 +499,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun copyFileToClipboard(uri: Uri) {
         clipboardUri = uri
-        _snackbarEvent.emit("已复制")
+        viewModelScope.launch {
+            _snackbarEvent.emit("已复制")
+        }
     }
 
     fun pasteFile(targetDirUri: Uri) {
@@ -546,7 +548,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (oldestUnmodified >= 0) {
                 tabs.removeAt(oldestUnmodified)
             } else {
-                _snackbarEvent.emit("已达最大标签数（10）")
+                viewModelScope.launch {
+                    _snackbarEvent.emit("已达最大标签数（10）")
+                }
                 return
             }
         }
