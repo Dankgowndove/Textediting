@@ -17,7 +17,7 @@ Textediting 是一款轻量级的 Android 文本编辑器，基于 Jetpack Compo
 | 组件 | 技术 |
 |------|------|
 | UI | Jetpack Compose + Material 3 |
-| 架构 | 单 Activity + ViewModel |
+| 架构 | Activity + ViewModel |
 | 语言 | Kotlin |
 | 最低 SDK | Android 7.0 (API 24) |
 | 目标 SDK | Android 14 (API 34) |
