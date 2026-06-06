@@ -96,7 +96,7 @@ fun FileTreeSidebar(
                 isSearching = isGlobalSearching,
                 onQueryChange = { viewModel.startGlobalSearch(it) },
                 onResultClick = { result ->
-                    viewModel.openFileFromGlobalSearch(result.fileUri)
+                    viewModel.openFileFromGlobalSearch(result.fileUri, result.lineNumber)
                     onClose()
                 },
                 onReplaceClick = { showReplaceDialog = true }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -83,7 +84,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isWholeWord = MutableStateFlow(false)
     val isWholeWord: StateFlow<Boolean> = _isWholeWord.asStateFlow()
 
+    private val _pendingScrollToLine = MutableSharedFlow<Int>()
+    val pendingScrollToLine: SharedFlow<Int> = _pendingScrollToLine.asSharedFlow()
+
+    private var refreshJob: kotlinx.coroutines.Job? = null
+
     private var clipboardUri: Uri? = null
+
+    private val textExtensions = setOf(
+        "txt", "md", "json", "xml", "csv", "ini", "cfg", "log",
+        "yml", "yaml", "java", "kt", "html", "htm", "css", "js",
+        "ts", "py", "sh", "bat", "properties", "gradle", "kts",
+        "c", "cpp", "h", "hpp", "go", "rs", "rb", "php", "sql"
+    )
 
     fun openFile(uri: Uri) {
         if (_isLoading.value) return
@@ -98,6 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val n = getFileName(uri)
                     Pair(t, n)
                 }
+                dismissSearch()
                 _fileName.value = name
                 _currentUri.value = uri
                 _textContent.value = text
@@ -116,6 +130,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createNewFile() {
+        dismissSearch()
         _fileName.value = "无标题"
         _currentUri.value = null
         _textContent.value = ""
@@ -282,11 +297,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun findAllPositions(text: String, query: String): List<Int> {
         val positions = mutableListOf<Int>()
         if (query.isEmpty()) return positions
-        val searchText = if (_isCaseSensitive.value) text else text.lowercase()
-        val searchQuery = if (_isCaseSensitive.value) query else query.lowercase()
+        val caseSensitive = _isCaseSensitive.value
+        val searchText = if (caseSensitive) text else text.lowercase()
+        val searchQuery = if (caseSensitive) query else query.lowercase()
+        val wholeWord = _isWholeWord.value
         var index = searchText.indexOf(searchQuery, 0)
         while (index >= 0) {
-            if (_isWholeWord.value) {
+            if (wholeWord) {
                 val before = if (index > 0) searchText[index - 1] else ' '
                 val after = if (index + searchQuery.length < searchText.length) searchText[index + searchQuery.length] else ' '
                 if (before.isLetterOrDigit() || after.isLetterOrDigit()) {
@@ -319,24 +336,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshFileTree() {
         val rootUri = _fileTree.value.rootUri ?: return
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            val expandedSnapshot = _fileTree.value.expandedUris
             _fileTree.value = _fileTree.value.copy(isLoading = true, error = null)
             try {
                 val nodes = withContext(Dispatchers.IO) {
-                    buildFileTree(rootUri, 0)
+                    buildFileTree(rootUri, 0, expandedSnapshot)
                 }
-                _fileTree.value = _fileTree.value.copy(
-                    nodes = nodes, isLoading = false
-                )
+                if (isActive) {
+                    _fileTree.value = _fileTree.value.copy(
+                        nodes = nodes, isLoading = false
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _fileTree.value = _fileTree.value.copy(
-                    isLoading = false, error = e.message
-                )
+                if (isActive) {
+                    _fileTree.value = _fileTree.value.copy(
+                        isLoading = false, error = e.message
+                    )
+                }
             }
         }
     }
 
-    private fun buildFileTree(uri: Uri, depth: Int): List<FileNode> {
+    private fun buildFileTree(uri: Uri, depth: Int, expandedUris: Set<Uri> = emptySet()): List<FileNode> {
         if (depth > 10) return emptyList()
         val context = getApplication<Application>()
         val docFile = DocumentFile.fromTreeUri(context, uri)
@@ -356,8 +381,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isDirectory = child.isDirectory,
                 depth = depth
             ))
-            if (child.isDirectory && _fileTree.value.expandedUris.contains(child.uri)) {
-                result.addAll(buildFileTree(child.uri, depth + 1))
+            if (child.isDirectory && expandedUris.contains(child.uri)) {
+                result.addAll(buildFileTree(child.uri, depth + 1, expandedUris))
             }
         }
         return result
@@ -628,7 +653,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val context = getApplication<Application>()
         val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return
         val children = dir.listFiles()
-        val textExtensions = setOf("txt", "md", "json", "xml", "csv", "ini", "cfg", "log", "yml", "yaml", "java", "kt", "xml", "html", "css", "js", "ts", "py", "sh", "bat", "properties")
         for (child in children) {
             if (results.size >= 500) break
             if (child.isDirectory) {
@@ -662,9 +686,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun openFileFromGlobalSearch(uri: Uri) {
-        val fileName = getFileName(uri)
+    fun openFileFromGlobalSearch(uri: Uri, lineNumber: Int = 0) {
         openFile(uri)
+        if (lineNumber > 0) {
+            viewModelScope.launch {
+                _pendingScrollToLine.emit(lineNumber)
+            }
+        }
     }
 
     fun performGlobalReplace(find: String, replace: String, onlyCurrentFile: Boolean) {
@@ -694,10 +722,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     val rootUri = _fileTree.value.rootUri ?: return@launch
                     val context = getApplication<Application>()
+                    val currentUri = _currentUri.value
                     withContext(Dispatchers.IO) {
                         replaceInDir(rootUri, find, replace, context, 0)
                     }
                     refreshFileTree()
+                    val tabs = _openTabs.value
+                    val newTabs = tabs.map { tab ->
+                        val uri = tab.uri ?: return@map tab
+                        if (currentUri != null && uri.toString() == currentUri.toString()) {
+                            tab
+                        } else {
+                            try {
+                                val newText = withContext(Dispatchers.IO) {
+                                    context.contentResolver.openInputStream(uri)?.use { input ->
+                                        BufferedReader(InputStreamReader(input, Charsets.UTF_8)).readText()
+                                    } ?: tab.content
+                                }
+                                if (newText != tab.content) {
+                                    tab.copy(content = newText, savedText = newText, isModified = false)
+                                } else {
+                                    tab
+                                }
+                            } catch (_: Exception) {
+                                tab
+                            }
+                        }
+                    }
+                    _openTabs.value = newTabs
                     val currentContent = _textContent.value
                     val newContent = currentContent.replace(find, replace, ignoreCase = true)
                     if (newContent != currentContent) {
@@ -718,7 +770,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (depth > 10) return
         val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return
         val children = dir.listFiles()
-        val textExtensions = setOf("txt", "md", "json", "xml", "csv", "ini", "cfg", "log", "yml", "yaml", "java", "kt", "xml", "html", "css", "js", "ts", "py", "sh", "bat", "properties")
         for (child in children) {
             if (child.isDirectory) {
                 replaceInDir(child.uri, find, replace, context, depth + 1)

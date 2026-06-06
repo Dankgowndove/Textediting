@@ -12,21 +12,35 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: ${{ inputs.clear_cache }}
 
       - name: Make gradlew executable
         run: chmod +x gradlew
@@ -38,14 +52,28 @@ jobs:
           rm -rf ~/.gradle/wrapper/
           echo "Gradle 缓存已清除"
 
-      - name: Clean build outputs
-        run: ./gradlew clean --no-daemon
+      - name: Verify Gradle wrapper
+        run: ./gradlew --version
 
-      - name: Build debug APK with detailed logs
-        run: ./gradlew :app:assembleDebug --info --stacktrace
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/reports/
+            **/build/reports/
+            **/build/logs/
+          if-no-files-found: ignore
+          retention-days: 7

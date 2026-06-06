@@ -68,7 +68,6 @@ fun MainScreen(viewModel: MainViewModel) {
     val currentSearchIndex by viewModel.currentSearchIndex.collectAsState()
     val currentUri by viewModel.currentUri.collectAsState()
     val lineCount by remember { derivedStateOf { content.lines().size } }
-    val charCount by remember { derivedStateOf { content.length } }
     val openTabs by viewModel.openTabs.collectAsState()
     val activeTabIndex by viewModel.activeTabIndex.collectAsState()
     val isCaseSensitive by viewModel.isCaseSensitive.collectAsState()
@@ -98,6 +97,13 @@ fun MainScreen(viewModel: MainViewModel) {
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { message ->
             snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.pendingScrollToLine.collect { line ->
+            kotlinx.coroutines.delay(150)
+            editTextRef.value?.scrollToLine(line)
         }
     }
 
