@@ -144,6 +144,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 savedText = text
                 _isModified.value = false
+                updateActiveTabSaved(text)
                 _snackbarEvent.emit("已保存")
             } catch (e: Exception) {
                 _snackbarEvent.emit("保存失败：${e.message}")
@@ -166,10 +167,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _fileName.value = name
                 savedText = text
                 _isModified.value = false
+                replaceActiveTabWith(uri, name, text)
                 _snackbarEvent.emit("已保存")
             } catch (e: Exception) {
                 _snackbarEvent.emit("保存失败：${e.message}")
             }
+        }
+    }
+
+    private fun updateActiveTabSaved(text: String) {
+        val tabs = _openTabs.value.toMutableList()
+        val idx = _activeTabIndex.value
+        if (idx in tabs.indices) {
+            tabs[idx] = tabs[idx].copy(
+                content = text,
+                savedText = text,
+                isModified = false
+            )
+            _openTabs.value = tabs
+        }
+    }
+
+    private fun replaceActiveTabWith(uri: Uri, name: String, text: String) {
+        val tabs = _openTabs.value.toMutableList()
+        val idx = _activeTabIndex.value
+        if (idx in tabs.indices) {
+            tabs[idx] = OpenTab(
+                uri = uri,
+                fileName = name,
+                content = text,
+                savedText = text,
+                isModified = false
+            )
+            _openTabs.value = tabs
         }
     }
 
@@ -196,17 +226,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun performSearch(query: String) {
         val text = _textContent.value
         if (query.isEmpty()) {
+            _searchPositions.value = emptyList()
             _searchMatchCount.value = 0
             _currentSearchIndex.value = -1
-            _searchPositions.value = emptyList()
             return
         }
-        val positions = mutableListOf<Int>()
-        var index = text.indexOf(query, 0)
-        while (index >= 0) {
-            positions.add(index)
-            index = text.indexOf(query, index + 1)
-        }
+        val positions = findAllPositions(text, query)
         _searchPositions.value = positions
         _searchMatchCount.value = positions.size
         _currentSearchIndex.value = if (positions.isNotEmpty()) 0 else -1
@@ -225,14 +250,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (query.isEmpty()) return
         val text = _textContent.value
         val positions = findAllPositions(text, query)
-        _searchPositions.value = positions
-        _searchMatchCount.value = positions.size
         if (positions.isEmpty()) {
+            _searchPositions.value = emptyList()
+            _searchMatchCount.value = 0
             _currentSearchIndex.value = -1
             return
         }
-        val next = (_currentSearchIndex.value + 1) % positions.size
-        _currentSearchIndex.value = next
+        _searchPositions.value = positions
+        _searchMatchCount.value = positions.size
+        val current = _currentSearchIndex.value
+        _currentSearchIndex.value = if (current < 0) 0 else (current + 1) % positions.size
     }
 
     fun searchPrevious() {
@@ -240,22 +267,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (query.isEmpty()) return
         val text = _textContent.value
         val positions = findAllPositions(text, query)
-        _searchPositions.value = positions
-        _searchMatchCount.value = positions.size
         if (positions.isEmpty()) {
+            _searchPositions.value = emptyList()
+            _searchMatchCount.value = 0
             _currentSearchIndex.value = -1
             return
         }
-        val prev = if (_currentSearchIndex.value > 0) _currentSearchIndex.value - 1 else positions.size - 1
-        _currentSearchIndex.value = prev
+        _searchPositions.value = positions
+        _searchMatchCount.value = positions.size
+        val current = _currentSearchIndex.value
+        _currentSearchIndex.value = if (current <= 0) positions.size - 1 else current - 1
     }
 
     private fun findAllPositions(text: String, query: String): List<Int> {
         val positions = mutableListOf<Int>()
-        var index = text.indexOf(query, 0)
+        if (query.isEmpty()) return positions
+        val searchText = if (_isCaseSensitive.value) text else text.lowercase()
+        val searchQuery = if (_isCaseSensitive.value) query else query.lowercase()
+        var index = searchText.indexOf(searchQuery, 0)
         while (index >= 0) {
+            if (_isWholeWord.value) {
+                val before = if (index > 0) searchText[index - 1] else ' '
+                val after = if (index + searchQuery.length < searchText.length) searchText[index + searchQuery.length] else ' '
+                if (before.isLetterOrDigit() || after.isLetterOrDigit()) {
+                    index = searchText.indexOf(searchQuery, index + 1)
+                    continue
+                }
+            }
             positions.add(index)
-            index = text.indexOf(query, index + 1)
+            index = searchText.indexOf(searchQuery, index + 1)
         }
         return positions
     }
@@ -380,10 +420,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?: throw Exception("无法访问文件")
                 val deleted = withContext(Dispatchers.IO) { docFile.delete() }
                 if (deleted) {
+                    val removedIdx = _openTabs.value.indexOfFirst { it.uri?.toString() == uri.toString() }
+                    val wasActive = removedIdx == _activeTabIndex.value
                     val tabs = _openTabs.value.filter { it.uri?.toString() != uri.toString() }
                     _openTabs.value = tabs
-                    if (_activeTabIndex.value >= tabs.size) {
-                        _activeTabIndex.value = tabs.size - 1
+                    if (tabs.isEmpty()) {
+                        _activeTabIndex.value = -1
+                        _fileName.value = ""
+                        _currentUri.value = null
+                        _textContent.value = ""
+                        savedText = ""
+                        _isModified.value = false
+                        undoManager.clear()
+                    } else if (wasActive) {
+                        val newIdx = removedIdx.coerceAtMost(tabs.size - 1)
+                        switchToTab(newIdx)
+                    } else if (_activeTabIndex.value > removedIdx) {
+                        _activeTabIndex.value = _activeTabIndex.value - 1
                     }
                     refreshFileTree()
                     _snackbarEvent.emit("已删除")
@@ -401,6 +454,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?: throw Exception("无法访问文件")
                 val renamed = withContext(Dispatchers.IO) { docFile.renameTo(newName) }
                 if (renamed != null) {
+                    val tabs = _openTabs.value.toMutableList()
+                    val idx = tabs.indexOfFirst { it.uri?.toString() == uri.toString() }
+                    if (idx >= 0) {
+                        tabs[idx] = tabs[idx].copy(fileName = newName)
+                        _openTabs.value = tabs
+                        if (_activeTabIndex.value == idx) {
+                            _fileName.value = newName
+                        }
+                    }
                     refreshFileTree()
                     _snackbarEvent.emit("已重命名为：$newName")
                 }
@@ -451,29 +513,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else -1
 
         if (existingIdx >= 0) {
-            _activeTabIndex.value = existingIdx
-            if (tabs[existingIdx].uri != null) {
-                switchToTab(existingIdx)
-            }
-        } else {
-            if (tabs.size >= 10) {
-                val oldestUnmodified = tabs.indexOfFirst { !it.isModified }
-                if (oldestUnmodified >= 0) {
-                    tabs.removeAt(oldestUnmodified)
-                } else {
-                    _snackbarEvent.emit("已达最大标签数（10）")
-                    return
-                }
-            }
-            tabs.add(OpenTab(
-                uri = uri,
-                fileName = fileName,
-                content = content,
-                savedText = content
-            ))
-            _openTabs.value = tabs
-            _activeTabIndex.value = tabs.size - 1
+            switchToTab(existingIdx)
+            return
         }
+        if (tabs.size >= 10) {
+            val oldestUnmodified = tabs.indexOfFirst { !it.isModified }
+            if (oldestUnmodified >= 0) {
+                tabs.removeAt(oldestUnmodified)
+            } else {
+                _snackbarEvent.emit("已达最大标签数（10）")
+                return
+            }
+        }
+        tabs.add(OpenTab(
+            uri = uri,
+            fileName = fileName,
+            content = content,
+            savedText = content
+        ))
+        _openTabs.value = tabs
+        switchToTab(tabs.size - 1)
     }
 
     fun switchToTab(index: Int) {
@@ -540,35 +599,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleWholeWord() {
         _isWholeWord.value = !_isWholeWord.value
         if (_searchQuery.value.isNotEmpty()) performSearch(_searchQuery.value)
-    }
-
-    fun performSearch(query: String) {
-        val text = _textContent.value
-        if (query.isEmpty()) {
-            _searchMatchCount.value = 0
-            _currentSearchIndex.value = -1
-            _searchPositions.value = emptyList()
-            return
-        }
-        val positions = mutableListOf<Int>()
-        val searchText = if (_isCaseSensitive.value) text else text.lowercase()
-        val searchQuery = if (_isCaseSensitive.value) query else query.lowercase()
-        var index = searchText.indexOf(searchQuery, 0)
-        while (index >= 0) {
-            if (_isWholeWord.value) {
-                val before = if (index > 0) searchText[index - 1] else ' '
-                val after = if (index + query.length < searchText.length) searchText[index + query.length] else ' '
-                if (before.isLetterOrDigit() || after.isLetterOrDigit()) {
-                    index = searchText.indexOf(searchQuery, index + 1)
-                    continue
-                }
-            }
-            positions.add(index)
-            index = searchText.indexOf(searchQuery, index + 1)
-        }
-        _searchPositions.value = positions
-        _searchMatchCount.value = positions.size
-        _currentSearchIndex.value = if (positions.isNotEmpty()) 0 else -1
     }
 
     fun startGlobalSearch(query: String) {
@@ -653,6 +683,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _textContent.value = newContent
                     savedText = newContent
                     _isModified.value = false
+                    undoManager.record(newContent)
                     val tabs = _openTabs.value.toMutableList()
                     val idx = tabs.indexOfFirst { it.uri?.toString() == uri.toString() }
                     if (idx >= 0) {
@@ -673,6 +704,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _textContent.value = newContent
                         savedText = newContent
                         _isModified.value = false
+                        undoManager.record(newContent)
                     }
                     _snackbarEvent.emit("全部替换完成")
                 }

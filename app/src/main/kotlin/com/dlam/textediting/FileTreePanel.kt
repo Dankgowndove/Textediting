@@ -42,6 +42,7 @@ fun FileTreeSidebar(
     var showReplaceDialog by remember { mutableStateOf(false) }
     var contextMenuUri by remember { mutableStateOf<Uri?>(null) }
     var contextMenuIsDir by remember { mutableStateOf(false) }
+    var contextMenuName by remember { mutableStateOf("") }
     var isSelectingRoot by remember { mutableStateOf(false) }
 
     val rootDirLauncher = rememberLauncherForActivityResult(
@@ -175,6 +176,7 @@ fun FileTreeSidebar(
                             onLongClick = {
                                 contextMenuUri = node.uri
                                 contextMenuIsDir = node.isDirectory
+                                contextMenuName = node.name
                             }
                         )
                     }
@@ -241,12 +243,13 @@ fun FileTreeSidebar(
 
     if (showRenameDialog && contextMenuUri != null) {
         RenameDialog(
-            currentName = "",
-            onDismiss = { showRenameDialog = false; contextMenuUri = null },
+            currentName = contextMenuName,
+            onDismiss = { showRenameDialog = false; contextMenuUri = null; contextMenuName = "" },
             onConfirm = { name ->
                 contextMenuUri?.let { viewModel.renameFile(it, name) }
                 showRenameDialog = false
                 contextMenuUri = null
+                contextMenuName = ""
             }
         )
     }

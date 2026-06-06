@@ -8,8 +8,8 @@ import android.graphics.Paint
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.AttributeSet
+import android.view.Gravity
 import android.view.MotionEvent
-import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,7 +25,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
@@ -50,7 +49,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -145,153 +143,6 @@ fun MainScreen(viewModel: MainViewModel) {
                         containerColor = MaterialTheme.colorScheme.surface
                     ),
                     actions = {
-                        if (isFileOpen) {
-                            Row(
-                                Modifier.horizontalScroll(rememberScrollState()),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(onClick = { viewModel.toggleSearch() }) {
-                                    Icon(Icons.Filled.Search, contentDescription = "搜索")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        val et = editTextRef.value ?: return@IconButton
-                                        val result = viewModel.undoManager.prepareUndo()
-                                        if (result != null) {
-                                            try {
-                                                et.setText(result)
-                                            } finally {
-                                                viewModel.undoManager.finishUndoRedo()
-                                            }
-                                        }
-                                    },
-                                    enabled = viewModel.canUndo
-                                ) {
-                                    Icon(Icons.Filled.Undo, contentDescription = "撤销")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        val et = editTextRef.value ?: return@IconButton
-                                        val result = viewModel.undoManager.prepareRedo()
-                                        if (result != null) {
-                                            try {
-                                                et.setText(result)
-                                            } finally {
-                                                viewModel.undoManager.finishUndoRedo()
-                                            }
-                                        }
-                                    },
-                                    enabled = viewModel.canRedo
-                                ) {
-                                    Icon(Icons.Filled.Redo, contentDescription = "重做")
-                                }
-                                IconButton(onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val lines = content.lines()
-                                    val sb = StringBuilder(lines.size * 8)
-                                    for (i in lines.indices) sb.append(i + 1).append('\n')
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
-                                }) {
-                                    Icon(Icons.Filled.ContentCopy, contentDescription = "复制行号")
-                                }
-                                IconButton(onClick = { showGoToLineDialog = true }) {
-                                    Icon(Icons.Filled.Numbers, contentDescription = "跳转到行")
-                                }
-                                IconButton(onClick = {
-                                    showStatsDialog = true
-                                    isStatsLoading = true
-                                    statsResult = null
-                                }) {
-                                    Icon(Icons.Filled.BarChart, contentDescription = "统计")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        if (currentUri != null) {
-                                            viewModel.saveFile()
-                                        } else {
-                                            saveAsLauncher.launch("new_file.txt")
-                                        }
-                                    },
-                                    enabled = isModified
-                                ) {
-                                    Icon(Icons.Filled.Save, contentDescription = "保存")
-                                }
-                            }
-                        } else {
-                            IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
-                                Icon(Icons.Filled.Add, contentDescription = "打开文件")
-                            }
-                        }
-                    }
-                )
-            }
-        ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                if (openTabs.isNotEmpty()) {
-                    TabBar(
-                        tabs = openTabs,
-                        activeIndex = activeTabIndex,
-                        onTabClick = { idx -> viewModel.switchToTab(idx) },
-                        onTabClose = { idx -> viewModel.closeTab(idx) },
-                        onTabMove = { from, to -> viewModel.moveTab(from, to) }
-                    )
-                }
-
-                AnimatedVisibility(visible = isSearchVisible) {
-                    SearchBar(
-                        query = searchQuery,
-                        onQueryChange = viewModel::onSearchQueryChanged,
-                        matchCount = searchMatchCount,
-                        currentIndex = currentSearchIndex,
-                        onPrevious = {
-                            viewModel.searchPrevious()
-                            scrollToSearchMatch()
-                        },
-                        onNext = {
-                            viewModel.searchNext()
-                            scrollToSearchMatch()
-                        },
-                        onClose = viewModel::dismissSearch,
-                        isCaseSensitive = isCaseSensitive,
-                        isWholeWord = isWholeWord,
-                        onToggleCaseSensitive = viewModel::toggleCaseSensitive,
-                        onToggleWholeWord = viewModel::toggleWholeWord
-                    )
-                }
-            }
-        }
-    }
-
-    if (isSearchVisible) {
-        BackHandler(onBack = viewModel::dismissSearch)
-    }
-
-    val isFileOpen = currentUri != null || content.isNotEmpty() || fileName.isNotEmpty()
-    val title = when {
-        fileName.isEmpty() -> "文本编辑器"
-        else -> fileName + if (isModified) "  ●" else ""
-    }
-
-    fun scrollToSearchMatch() {
-        val pos = viewModel.getSearchPosition() ?: return
-        editTextRef.value?.let { et ->
-            et.setSelection(pos.first, pos.first + pos.second)
-        }
-    }
-
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text(title, maxLines = 1) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                actions = {
                     if (isFileOpen) {
                         Row(
                             Modifier.horizontalScroll(rememberScrollState()),
@@ -378,6 +229,16 @@ fun MainScreen(viewModel: MainViewModel) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            if (openTabs.isNotEmpty()) {
+                TabBar(
+                    tabs = openTabs,
+                    activeIndex = activeTabIndex,
+                    onTabClick = { idx -> viewModel.switchToTab(idx) },
+                    onTabClose = { idx -> viewModel.closeTab(idx) },
+                    onTabMove = { from, to -> viewModel.moveTab(from, to) }
+                )
+            }
+
             AnimatedVisibility(visible = isSearchVisible) {
                 SearchBar(
                     query = searchQuery,
@@ -392,7 +253,11 @@ fun MainScreen(viewModel: MainViewModel) {
                         viewModel.searchNext()
                         scrollToSearchMatch()
                     },
-                    onClose = viewModel::dismissSearch
+                    onClose = viewModel::dismissSearch,
+                    isCaseSensitive = isCaseSensitive,
+                    isWholeWord = isWholeWord,
+                    onToggleCaseSensitive = viewModel::toggleCaseSensitive,
+                    onToggleWholeWord = viewModel::toggleWholeWord
                 )
             }
 
@@ -433,6 +298,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 et.hint = "在此输入文本..."
                                 et.setHorizontallyScrolling(false)
                                 et.maxLines = Integer.MAX_VALUE
+                                et.gravity = Gravity.TOP
 
                                 et.addTextChangedListener(object : TextWatcher {
                                     override fun beforeTextChanged(
