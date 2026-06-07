@@ -1053,20 +1053,23 @@ private fun computeStats(text: String): StatsResult {
 
 // ── Gutter and editor colour helpers: returns light/dark-appropriate colours ──
 private fun gutterColors(isDark: Boolean) = if (isDark) {
-    Triple(0xFF1E1E1E.toInt(), 0xFF3A3A3A.toInt(), 0xFF888888.toInt())
+    // bg: slightly lighter than editor bg so gutter is subtly distinct
+    // divider: soft border between gutter and text
+    // num: bright enough to read easily on dark
+    Triple(0xFF1A1A1A.toInt(), 0xFF3A3A3A.toInt(), 0xFFAAAAAA.toInt())
 } else {
     Triple(0xFFF0F0F0.toInt(), 0xFFD0D0D0.toInt(), 0xFF888888.toInt())
 }
 
 private fun editorColors(isDark: Boolean) = if (isDark) {
     Triple(
-        0xFF212121.toInt(),  // text color: light gray (not pure white, better for eyes)
-        0xFF1E1E1E.toInt(),  // background color: dark
+        0xFFEEEEEE.toInt(),  // text color: near white — clearly visible on dark background
+        0xFF121212.toInt(),  // background color: darker for better contrast
         0xFFBB86FC.toInt()   // cursor/handle color: accent purple
     )
 } else {
     Triple(
-        0xFF1F1F1F.toInt(),  // text color: near black
+        0xFF1A1A1A.toInt(),  // text color: near black — clearly visible on light background
         0xFFFFFFFF.toInt(),  // background color: white
         0xFF6650A4.toInt()   // cursor/handle color: accent purple
     )
@@ -1075,7 +1078,12 @@ private fun editorColors(isDark: Boolean) = if (isDark) {
 /**
  * Custom EditText with line numbers drawn in the left gutter.
  * Supports show/hide line numbers and dark/light theme-aware colors.
- * Only draws visible line numbers for performance on large files.
+ *
+ * Key design decisions for large-file performance:
+ * - Only draws line numbers for lines visible on screen (no full-list rendering)
+ * - Uses a reusable CharArray for number formatting to avoid per-frame String allocations
+ * - Draws the gutter AFTER super.onDraw() so line numbers always render on top
+ * - Gutter is drawn inside a clip-rect for clean boundaries
  */
 class LinedEditText(
     context: Context,
@@ -1085,7 +1093,6 @@ class LinedEditText(
 
     private var gutterWidthPx: Float = 0f
     private var gutterMarginPx: Float = 0f
-    private var currentDensity: Float = 0f
 
     private val gutterBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val gutterDividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1095,10 +1102,12 @@ class LinedEditText(
         textAlign = Paint.Align.RIGHT
     }
 
+    // Reusable buffer for formatting line numbers — avoids String allocations during scroll
+    private val tmpChars = CharArray(10)
+
     init {
         val density = resources.displayMetrics.density
-        currentDensity = density
-        gutterWidthPx = 48f * density
+        gutterWidthPx = 56f * density
         gutterMarginPx = 6f * density
         lineNumberPaint.textSize = 12f * density
         updateAllColors()
@@ -1127,8 +1136,8 @@ class LinedEditText(
         val (textCol, backCol, accentCol) = editorColors(isDark)
         setTextColor(textCol)
         setBackgroundColor(backCol)
-        // highlight color (selection)
-        highlightColor = (0x66333333).toInt()  // subtle selection highlight
+        // selection highlight: light on dark, dark on light
+        highlightColor = if (isDark) 0x44FFFFFF.toInt() else 0x33000000.toInt()
         // cursor / text-select handle colour
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -1192,31 +1201,63 @@ class LinedEditText(
     }
 
     override fun onDraw(canvas: Canvas) {
+        // 1. Let the EditText draw its text, cursor, selection etc. first
+        super.onDraw(canvas)
+
+        // 2. Draw the gutter on top so line numbers are never covered by text rendering
         if (showLineNumbers) {
             val l = layout
-            if (l != null) drawGutter(canvas, l)
+            if (l != null && l.lineCount > 0) {
+                drawGutter(canvas, l)
+            }
         }
-        super.onDraw(canvas)
     }
 
     private fun drawGutter(canvas: Canvas, layout: android.text.Layout) {
         val viewHeight = height - paddingTop - paddingBottom
         if (viewHeight <= 0) return
 
-        canvas.drawRect(0f, 0f, gutterWidthPx, height.toFloat(), gutterBgPaint)
-        canvas.drawLine(gutterWidthPx, 0f, gutterWidthPx, height.toFloat(), gutterDividerPaint)
+        // Clip to gutter bounds for clean rendering
+        val clipLeft = 0f
+        val clipTop = paddingTop.toFloat()
+        val clipRight = gutterWidthPx
+        val clipBottom = (height - paddingBottom).toFloat()
+        canvas.save()
+        canvas.clipRect(clipLeft, clipTop, clipRight, clipBottom)
 
+        // Gutter background and divider
+        canvas.drawRect(clipLeft, clipTop, clipRight, clipBottom, gutterBgPaint)
+        canvas.drawLine(gutterWidthPx, clipTop, gutterWidthPx, clipBottom, gutterDividerPaint)
+
+        // Only draw the line numbers that are currently visible
         val firstVisibleLine = maxOf(0, layout.getLineForVertical(scrollY))
-        val lastVisibleLine = minOf(layout.lineCount - 1, layout.getLineForVertical(scrollY + viewHeight))
+        val contentBottom = scrollY + viewHeight
+        val lastVisibleLine = minOf(layout.lineCount - 1, layout.getLineForVertical(contentBottom))
+
+        val padTop = paddingTop.toFloat()
+        val scrollYf = scrollY.toFloat()
+        val numX = gutterWidthPx - gutterMarginPx
 
         for (line in firstVisibleLine..lastVisibleLine) {
-            val baseline = layout.getLineBaseline(line).toFloat() - scrollY.toFloat() + paddingTop.toFloat()
-            canvas.drawText(
-                (line + 1).toString(),
-                gutterWidthPx - gutterMarginPx,
-                baseline,
-                lineNumberPaint
-            )
+            val baseline = layout.getLineBaseline(line).toFloat() - scrollYf + padTop
+            drawLineNumber(canvas, line + 1, numX, baseline)
         }
+
+        canvas.restore()
+    }
+
+    /** Format [num] into [tmpChars] and draw it — zero String allocation. */
+    private fun drawLineNumber(canvas: Canvas, num: Int, x: Float, baseline: Float) {
+        var n = num
+        var pos = tmpChars.size
+        if (n == 0) {
+            tmpChars[--pos] = '0'
+        } else {
+            while (n > 0) {
+                tmpChars[--pos] = ('0' + (n % 10))
+                n /= 10
+            }
+        }
+        canvas.drawText(tmpChars, pos, tmpChars.size - pos, x, baseline, lineNumberPaint)
     }
 }
