@@ -14,3 +14,4 @@ app/keystore.properties
 app/keystore/
 *.jks
 *.keystore
+日志/
