@@ -460,9 +460,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             if (et.textSize != fontSize.toFloat()) {
                                 et.textSize = fontSize.toFloat()
                             }
-                            if (et.isHorizontallyScrolling != !wordWrap) {
-                                et.setHorizontallyScrolling(!wordWrap)
-                            }
+                            et.setHorizontallyScrolling(!wordWrap)
                             et.setShowLineNumbers(showLineNumbers)
                         },
                         modifier = Modifier.fillMaxSize()
