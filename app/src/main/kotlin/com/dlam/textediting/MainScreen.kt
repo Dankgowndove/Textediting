@@ -28,8 +28,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -489,7 +492,7 @@ private fun TabBar(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = if (tab.isModified) Icons.Filled.Circle else Icons.Filled.Description,
+                            imageVector = if (tab.isModified) Icons.Filled.FiberManualRecord else Icons.Filled.Description,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
                             tint = if (tab.isModified) MaterialTheme.colorScheme.primary
