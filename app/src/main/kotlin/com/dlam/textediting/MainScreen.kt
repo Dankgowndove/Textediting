@@ -8,8 +8,11 @@ import android.graphics.Paint
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -39,6 +43,7 @@ import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material3.*
@@ -46,8 +51,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,17 +84,24 @@ fun MainScreen(viewModel: MainViewModel) {
     val activeTabIndex by viewModel.activeTabIndex.collectAsState()
     val isCaseSensitive by viewModel.isCaseSensitive.collectAsState()
     val isWholeWord by viewModel.isWholeWord.collectAsState()
+    val fontSize by viewModel.settings.fontSize.collectAsState()
+    val showLineNumbers by viewModel.settings.showLineNumbers.collectAsState()
+    val wordWrap by viewModel.settings.wordWrap.collectAsState()
+    val maxTabs by viewModel.settings.maxTabs.collectAsState()
 
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     var showStatsDialog by remember { mutableStateOf(false) }
     var showGoToLineDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
     var statsResult by remember { mutableStateOf<StatsResult?>(null) }
     var isStatsLoading by remember { mutableStateOf(false) }
 
     val editTextRef = remember { mutableStateOf<LinedEditText?>(null) }
+    val isKeyboardVisible = remember { mutableStateOf(false) }
 
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -110,20 +126,39 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    if (isSearchVisible) {
+    // Back press handling: dismiss keyboard first, then search
+    if (isKeyboardVisible.value) {
+        BackHandler {
+            editTextRef.value?.let { et ->
+                et.clearFocus()
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.hideSoftInputFromWindow(et.windowToken, 0)
+                isKeyboardVisible.value = false
+            }
+        }
+    } else if (isSearchVisible) {
         BackHandler(onBack = viewModel::dismissSearch)
     }
 
     val isFileOpen = openTabs.isNotEmpty() || currentUri != null || content.isNotEmpty() || fileName.isNotEmpty()
     val title = when {
         fileName.isEmpty() -> "文本编辑器"
-        else -> fileName + if (isModified) "  \u25CF" else ""
+        else -> fileName + if (isModified) "  ●" else ""
     }
 
     fun scrollToSearchMatch() {
         val pos = viewModel.getSearchPosition() ?: return
         editTextRef.value?.let { et ->
             et.setSelection(pos.first, pos.first + pos.second)
+        }
+    }
+
+    fun dismissKeyboard() {
+        editTextRef.value?.let { et ->
+            et.clearFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.hideSoftInputFromWindow(et.windowToken, 0)
+            isKeyboardVisible.value = false
         }
     }
 
@@ -211,6 +246,9 @@ fun MainScreen(viewModel: MainViewModel) {
                             }) {
                                 Icon(Icons.Filled.BarChart, contentDescription = "统计")
                             }
+                            IconButton(onClick = { showSettingsDialog = true }) {
+                                Icon(Icons.Filled.Settings, contentDescription = "设置")
+                            }
                             IconButton(
                                 onClick = {
                                     if (currentUri != null) {
@@ -225,8 +263,13 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         }
                     } else {
-                        IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
-                            Icon(Icons.Filled.Add, contentDescription = "打开文件")
+                        Row {
+                            IconButton(onClick = { showSettingsDialog = true }) {
+                                Icon(Icons.Filled.Settings, contentDescription = "设置")
+                            }
+                            IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
+                                Icon(Icons.Filled.Add, contentDescription = "打开文件")
+                            }
                         }
                     }
                 }
@@ -242,6 +285,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 TabBar(
                     tabs = openTabs,
                     activeIndex = activeTabIndex,
+                    maxTabs = maxTabs,
                     onTabClick = { idx -> viewModel.switchToTab(idx) },
                     onTabClose = { idx -> viewModel.closeTab(idx) },
                     onTabMove = { from, to -> viewModel.moveTab(from, to) }
@@ -292,7 +336,18 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                 }
             } else {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusable(true)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                awaitPointerEvent()
+                                // Tapping the background dismisses the keyboard
+                                dismissKeyboard()
+                            }
+                        }
+                ) {
                     if (isLoading) {
                         CircularProgressIndicator(
                             modifier = Modifier.align(Alignment.Center)
@@ -300,14 +355,27 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                     AndroidView(
                         factory = { ctx ->
-                            LinedEditText(ctx).also { et ->
+                            LinedEditText(ctx, showLineNumbers = showLineNumbers).also { et ->
                                 et.isVerticalScrollBarEnabled = true
-                                et.textSize = 14f
+                                et.textSize = fontSize.toFloat()
                                 et.typeface = android.graphics.Typeface.MONOSPACE
                                 et.hint = "在此输入文本..."
-                                et.setHorizontallyScrolling(false)
+                                et.setHorizontallyScrolling(!wordWrap)
                                 et.maxLines = Integer.MAX_VALUE
                                 et.gravity = Gravity.TOP
+
+                                // IME action: handle keyboard dismiss via back key
+                                et.setOnEditorActionListener { _, actionId, event ->
+                                    if (actionId == EditorInfo.IME_ACTION_DONE ||
+                                        (event?.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP)
+                                    ) {
+                                        et.clearFocus()
+                                        val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                                        imm.hideSoftInputFromWindow(et.windowToken, 0)
+                                        isKeyboardVisible.value = false
+                                        true
+                                    } else false
+                                }
 
                                 et.addTextChangedListener(object : TextWatcher {
                                     override fun beforeTextChanged(
@@ -330,9 +398,24 @@ fun MainScreen(viewModel: MainViewModel) {
                         update = { et ->
                             if (et.text?.toString() != content) {
                                 val hadFocus = et.hasFocus()
+                                val selStart = et.selectionStart
+                                val selEnd = et.selectionEnd
                                 et.setText(content)
+                                // Restore cursor position if possible
+                                if (selStart in 0..content.length && selEnd in selStart..content.length) {
+                                    et.setSelection(selStart, selEnd)
+                                }
                                 if (hadFocus) et.requestFocus()
                             }
+                            // Update settings-driven properties
+                            if (et.textSize != fontSize.toFloat()) {
+                                et.textSize = fontSize.toFloat()
+                            }
+                            val shouldWrap = !wordWrap
+                            if (et.isHorizontallyScrolling != shouldWrap) {
+                                et.setHorizontallyScrolling(shouldWrap)
+                            }
+                            et.setShowLineNumbers(showLineNumbers)
                         },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -365,6 +448,197 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         )
     }
+
+    if (showSettingsDialog) {
+        SettingsDialog(
+            settings = viewModel.settings,
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    settings: SettingsManager,
+    onDismiss: () -> Unit
+) {
+    val fontSize by settings.fontSize.collectAsState()
+    val maxTabs by settings.maxTabs.collectAsState()
+    val showLineNumbers by settings.showLineNumbers.collectAsState()
+    val wordWrap by settings.wordWrap.collectAsState()
+    val autoSaveInterval by settings.autoSaveInterval.collectAsState()
+
+    var showFontSizeMenu by remember { mutableStateOf(false) }
+    var showMaxTabsMenu by remember { mutableStateOf(false) }
+    var showAutoSaveMenu by remember { mutableStateOf(false) }
+
+    val autoSaveLabels = mapOf(
+        0 to "关闭",
+        30 to "30 秒",
+        60 to "1 分钟",
+        120 to "2 分钟",
+        300 to "5 分钟"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // ── Font Size ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("字体大小", style = MaterialTheme.typography.bodyMedium)
+                    Box {
+                        TextButton(onClick = { showFontSizeMenu = true }) {
+                            Text("${fontSize}sp", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        DropdownMenu(
+                            expanded = showFontSizeMenu,
+                            onDismissRequest = { showFontSizeMenu = false }
+                        ) {
+                            settings.getAllFontSizes().forEach { size ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "${size}sp",
+                                            fontWeight = if (size == fontSize) {
+                                                androidx.compose.ui.text.font.FontWeight.Bold
+                                            } else androidx.compose.ui.text.font.FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        settings.setFontSize(size)
+                                        showFontSizeMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                // ── Max Tabs ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("最大标签数", style = MaterialTheme.typography.bodyMedium)
+                    Box {
+                        TextButton(onClick = { showMaxTabsMenu = true }) {
+                            Text("$maxTabs", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        DropdownMenu(
+                            expanded = showMaxTabsMenu,
+                            onDismissRequest = { showMaxTabsMenu = false }
+                        ) {
+                            settings.getAllMaxTabs().forEach { count ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "$count",
+                                            fontWeight = if (count == maxTabs) {
+                                                androidx.compose.ui.text.font.FontWeight.Bold
+                                            } else androidx.compose.ui.text.font.FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        settings.setMaxTabs(count)
+                                        showMaxTabsMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                // ── Show Line Numbers ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("显示行号", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = showLineNumbers,
+                        onCheckedChange = { settings.setShowLineNumbers(it) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── Word Wrap ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("自动换行", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = wordWrap,
+                        onCheckedChange = { settings.setWordWrap(it) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── Auto-save ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("自动保存", style = MaterialTheme.typography.bodyMedium)
+                    Box {
+                        TextButton(onClick = { showAutoSaveMenu = true }) {
+                            Text(
+                                autoSaveLabels[autoSaveInterval] ?: "关闭",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showAutoSaveMenu,
+                            onDismissRequest = { showAutoSaveMenu = false }
+                        ) {
+                            settings.getAllAutoSaveIntervals().forEach { interval ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            autoSaveLabels[interval] ?: "$interval 秒",
+                                            fontWeight = if (interval == autoSaveInterval) {
+                                                androidx.compose.ui.text.font.FontWeight.Bold
+                                            } else androidx.compose.ui.text.font.FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        settings.setAutoSaveInterval(interval)
+                                        showAutoSaveMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "设置实时生效，无需重启应用",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        }
+    )
 }
 
 @Composable
@@ -462,6 +736,7 @@ private fun SearchBar(
 private fun TabBar(
     tabs: List<OpenTab>,
     activeIndex: Int,
+    maxTabs: Int,
     onTabClick: (Int) -> Unit,
     onTabClose: (Int) -> Unit,
     onTabMove: (Int, Int) -> Unit
@@ -519,7 +794,7 @@ private fun TabBar(
                     }
                 }
             }
-            if (tabs.size >= 10) {
+            if (tabs.size >= maxTabs) {
                 item {
                     Box(
                         modifier = Modifier
@@ -708,7 +983,7 @@ private fun computeStats(text: String): StatsResult {
     val totalWords = text.split(Regex("\\s+")).count { it.isNotEmpty() }
     val paragraphs = text.split(Regex("\\n\\s*\\n")).count { it.isNotBlank() }
 
-    val chineseChars = text.count { it in '\u4e00'..'\u9fff' || it in '\u3400'..'\u4dbf' }
+    val chineseChars = text.count { it in '一'..'鿿' || it in '㐀'..'䶿' }
     val englishChars = text.count { it in 'a'..'z' || it in 'A'..'Z' }
     val digitChars = text.count { it in '0'..'9' }
     val punctSet = setOf('，','。','、','；','：','？','！','.',',',';',':','?','!','"','\'','(',')','（','）','【','】','《','》','<','>','—','…','·')
@@ -738,52 +1013,101 @@ private fun computeStats(text: String): StatsResult {
     )
 }
 
+// ── Gutter-colour helper: returns light/dark-appropriate colours ──
+private fun gutterColors(isDark: Boolean) = if (isDark) {
+    Triple(0xFF1E1E1E.toInt(), 0xFF3A3A3A.toInt(), 0xFF888888.toInt())
+} else {
+    Triple(0xFFF0F0F0.toInt(), 0xFFD0D0D0.toInt(), 0xFF888888.toInt())
+}
+
 /**
  * Custom EditText with line numbers drawn in the left gutter.
- * Only draws visible line numbers for 100k+ line performance.
+ * Supports show/hide line numbers and dark/light theme-aware colors.
+ * Only draws visible line numbers for performance on large files.
  */
 class LinedEditText(
     context: Context,
-    attrs: AttributeSet? = null
+    attrs: AttributeSet? = null,
+    private var showLineNumbers: Boolean = true
 ) : AppCompatEditText(context, attrs) {
 
-    private val gutterWidthPx: Float
-    private val gutterMarginPx: Float
+    private var gutterWidthPx: Float = 0f
+    private var gutterMarginPx: Float = 0f
+    private var currentDensity: Float = 0f
 
-    private val gutterBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#F0F0F0")
-    }
+    private val gutterBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val gutterDividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#D0D0D0")
         strokeWidth = 1.5f
     }
     private val lineNumberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#888888")
         textAlign = Paint.Align.RIGHT
     }
 
     init {
         val density = resources.displayMetrics.density
+        currentDensity = density
         gutterWidthPx = 48f * density
         gutterMarginPx = 6f * density
         lineNumberPaint.textSize = 12f * density
-        setPadding(
-            (gutterWidthPx + 8f * density).toInt(),
-            paddingTop,
-            paddingRight,
-            paddingBottom
-        )
+        updateGutterColors()
+        updatePadding()
         isFocusable = true
         isFocusableInTouchMode = true
+    }
+
+    private fun updateGutterColors() {
+        val isDark = try {
+            val tv = TypedValue()
+            context.theme.resolveAttribute(android.R.attr.isLightTheme, tv, true)
+            !tv.data.let { it != 0 }
+        } catch (_: Exception) {
+            false
+        }
+        val (bg, div, num) = gutterColors(isDark)
+        gutterBgPaint.color = bg
+        gutterDividerPaint.color = div
+        lineNumberPaint.color = num
+    }
+
+    private fun updatePadding() {
+        val density = resources.displayMetrics.density
+        val leftPad = if (showLineNumbers) {
+            (gutterWidthPx + 8f * density).toInt()
+        } else {
+            (8f * density).toInt()
+        }
+        setPadding(leftPad, paddingTop, paddingRight, paddingBottom)
+    }
+
+    fun setShowLineNumbers(show: Boolean) {
+        if (showLineNumbers != show) {
+            showLineNumbers = show
+            updatePadding()
+            invalidate()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_DOWN) {
             requestFocus()
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            // Only show keyboard if not already focused (prevent re-showing)
+            if (!hasFocus()) {
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            }
         }
         return super.onTouchEvent(event)
+    }
+
+    override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        // Dismiss keyboard on back key
+        if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+            clearFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.hideSoftInputFromWindow(windowToken, 0)
+            return false // let the system handle the rest
+        }
+        return super.onKeyPreIme(keyCode, event)
     }
 
     fun scrollToLine(line: Int) {
@@ -793,8 +1117,10 @@ class LinedEditText(
     }
 
     override fun onDraw(canvas: Canvas) {
-        val l = layout
-        if (l != null) drawGutter(canvas, l)
+        if (showLineNumbers) {
+            val l = layout
+            if (l != null) drawGutter(canvas, l)
+        }
         super.onDraw(canvas)
     }
 
@@ -809,10 +1135,11 @@ class LinedEditText(
         val lastVisibleLine = minOf(layout.lineCount - 1, layout.getLineForVertical(scrollY + viewHeight))
 
         for (line in firstVisibleLine..lastVisibleLine) {
+            val baseline = layout.getLineBaseline(line).toFloat() - scrollY.toFloat() + paddingTop.toFloat()
             canvas.drawText(
                 (line + 1).toString(),
                 gutterWidthPx - gutterMarginPx,
-                layout.getLineBaseline(line).toFloat() - scrollY.toFloat() + paddingTop.toFloat(),
+                baseline,
                 lineNumberPaint
             )
         }

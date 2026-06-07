@@ -21,6 +21,8 @@ import java.io.InputStreamReader
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
+    val settings by lazy { SettingsManager(application) }
+
     private val _textContent = MutableStateFlow("")
     val textContent: StateFlow<String> = _textContent.asStateFlow()
 
@@ -90,6 +92,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var refreshJob: kotlinx.coroutines.Job? = null
 
     private var clipboardUri: Uri? = null
+
+    // File tree cache: maps directory URI to its (sorted child URIs, names, isDir) triplets
+    private val dirCache = mutableMapOf<Uri, List<Triple<Uri, String, Boolean>>>()
+
+    fun clearFileTreeCache() {
+        dirCache.clear()
+    }
 
     private val textExtensions = setOf(
         "txt", "md", "json", "xml", "csv", "ini", "cfg", "log",
@@ -326,6 +335,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
                             android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
+                dirCache.clear()
                 _fileTree.value = _fileTree.value.copy(rootUri = uri, isLoading = true)
                 refreshFileTree()
             } catch (e: Exception) {
@@ -337,6 +347,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshFileTree() {
         val rootUri = _fileTree.value.rootUri ?: return
         refreshJob?.cancel()
+        // Invalidate cache for the root directory so listings are refreshed
+        dirCache.remove(rootUri)
+        // Also invalidate any expanded directories so they pick up changes
+        _fileTree.value.expandedUris.forEach { dirCache.remove(it) }
         refreshJob = viewModelScope.launch {
             val expandedSnapshot = _fileTree.value.expandedUris
             _fileTree.value = _fileTree.value.copy(isLoading = true, error = null)
@@ -361,28 +375,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildFileTree(uri: Uri, depth: Int, expandedUris: Set<Uri> = emptySet()): List<FileNode> {
-        if (depth > 10) return emptyList()
+    private fun getOrLoadDirListing(uri: Uri): List<Triple<Uri, String, Boolean>> {
+        dirCache[uri]?.let { return it }
         val context = getApplication<Application>()
         val docFile = DocumentFile.fromTreeUri(context, uri)
             ?: DocumentFile.fromSingleUri(context, uri)
         if (docFile == null || !docFile.exists()) return emptyList()
-
         val children = docFile.listFiles().toList()
-        val sorted = children.sortedWith(compareByDescending<DocumentFile> { it.isDirectory }
-            .thenBy { it.name?.lowercase() ?: "" })
+        // Sort: directories first, then by name (case-insensitive)
+        val sorted = children.sortedWith(
+            compareByDescending<DocumentFile> { it.isDirectory }
+                .thenBy { it.name?.lowercase() ?: "" }
+        )
+        val listing = sorted.map { Triple(it.uri, it.name ?: "未知", it.isDirectory) }
+        dirCache[uri] = listing
+        return listing
+    }
 
+    private fun buildFileTree(uri: Uri, depth: Int, expandedUris: Set<Uri> = emptySet()): List<FileNode> {
+        if (depth > 10) return emptyList()
+        val children = getOrLoadDirListing(uri)
         val result = mutableListOf<FileNode>()
-        for (child in sorted) {
-            val name = child.name ?: "未知"
+        for ((childUri, name, isDir) in children) {
             result.add(FileNode(
-                uri = child.uri,
+                uri = childUri,
                 name = name,
-                isDirectory = child.isDirectory,
+                isDirectory = isDir,
                 depth = depth
             ))
-            if (child.isDirectory && expandedUris.contains(child.uri)) {
-                result.addAll(buildFileTree(child.uri, depth + 1, expandedUris))
+            if (isDir && expandedUris.contains(childUri)) {
+                result.addAll(buildFileTree(childUri, depth + 1, expandedUris))
             }
         }
         return result
@@ -543,13 +565,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             switchToTab(existingIdx)
             return
         }
-        if (tabs.size >= 10) {
+        val maxTabs = settings.maxTabs.value
+        if (tabs.size >= maxTabs) {
             val oldestUnmodified = tabs.indexOfFirst { !it.isModified }
             if (oldestUnmodified >= 0) {
                 tabs.removeAt(oldestUnmodified)
             } else {
                 viewModelScope.launch {
-                    _snackbarEvent.emit("已达最大标签数（10）")
+                    _snackbarEvent.emit("已达最大标签数（$maxTabs）")
                 }
                 return
             }
