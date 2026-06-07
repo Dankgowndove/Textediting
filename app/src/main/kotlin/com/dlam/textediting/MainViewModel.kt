@@ -344,13 +344,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Full refresh — clears cache and rebuilds entire tree. Used for manual refresh or after file ops. */
     fun refreshFileTree() {
         val rootUri = _fileTree.value.rootUri ?: return
         refreshJob?.cancel()
-        // Invalidate cache for the root directory so listings are refreshed
-        dirCache.remove(rootUri)
-        // Also invalidate any expanded directories so they pick up changes
-        _fileTree.value.expandedUris.forEach { dirCache.remove(it) }
+        // Only invalidate cache on full manual refresh
+        dirCache.clear()
         refreshJob = viewModelScope.launch {
             val expandedSnapshot = _fileTree.value.expandedUris
             _fileTree.value = _fileTree.value.copy(isLoading = true, error = null)
@@ -410,15 +409,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return result
     }
 
+    /** Toggle expand/collapse a directory — updates the node list incrementally without full rebuild. */
     fun toggleExpandDir(uri: Uri) {
-        val current = _fileTree.value.expandedUris.toMutableSet()
-        if (current.contains(uri)) {
-            current.remove(uri)
+        val currentState = _fileTree.value
+        val currentExpanded = currentState.expandedUris.toMutableSet()
+        val isExpanding = !currentExpanded.contains(uri)
+
+        if (isExpanding) {
+            currentExpanded.add(uri)
+            _fileTree.value = currentState.copy(expandedUris = currentExpanded, isLoading = true)
+
+            // Load children for just this directory in background
+            refreshJob?.cancel()
+            refreshJob = viewModelScope.launch {
+                try {
+                    val newNodes = currentState.nodes.toMutableList()
+                    val parentIdx = newNodes.indexOfFirst { it.uri == uri }
+                    if (parentIdx >= 0) {
+                        val parentDepth = newNodes[parentIdx].depth
+                        // Remove any previously cached children at this position (shouldn't exist, but be safe)
+                        var removeIdx = parentIdx + 1
+                        while (removeIdx < newNodes.size && newNodes[removeIdx].depth > parentDepth) {
+                            removeIdx++
+                        }
+                        if (removeIdx > parentIdx + 1) {
+                            newNodes.subList(parentIdx + 1, removeIdx).clear()
+                        }
+                        // Load new children
+                        val children = withContext(Dispatchers.IO) {
+                            buildFileTree(uri, parentDepth + 1, currentExpanded)
+                        }
+                        newNodes.addAll(parentIdx + 1, children)
+                    }
+                    if (isActive) {
+                        _fileTree.value = _fileTree.value.copy(
+                            nodes = newNodes, expandedUris = currentExpanded, isLoading = false
+                        )
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (isActive) {
+                        _fileTree.value = _fileTree.value.copy(
+                            isLoading = false, error = e.message
+                        )
+                    }
+                }
+            }
         } else {
-            current.add(uri)
+            // Collapsing: remove children from node list
+            currentExpanded.remove(uri)
+            // Also remove all descendant URIs from expanded set
+            val descendantsToRemove = currentExpanded.filter { expandedUri ->
+                expandedUri.toString().startsWith(uri.toString())
+            }.toSet()
+            currentExpanded.removeAll(descendantsToRemove)
+            val newNodes = currentState.nodes.toMutableList()
+            val parentIdx = newNodes.indexOfFirst { it.uri == uri }
+            if (parentIdx >= 0) {
+                val parentDepth = newNodes[parentIdx].depth
+                var removeIdx = parentIdx + 1
+                while (removeIdx < newNodes.size && newNodes[removeIdx].depth > parentDepth) {
+                    removeIdx++
+                }
+                if (removeIdx > parentIdx + 1) {
+                    newNodes.subList(parentIdx + 1, removeIdx).clear()
+                }
+            }
+            _fileTree.value = _fileTree.value.copy(
+                nodes = newNodes, expandedUris = currentExpanded
+            )
         }
-        _fileTree.value = _fileTree.value.copy(expandedUris = current)
-        refreshFileTree()
     }
 
     fun createFile(parentUri: Uri, name: String) {

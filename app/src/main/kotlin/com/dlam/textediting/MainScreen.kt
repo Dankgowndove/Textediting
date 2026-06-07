@@ -97,6 +97,7 @@ fun MainScreen(viewModel: MainViewModel) {
     var showStatsDialog by remember { mutableStateOf(false) }
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     var statsResult by remember { mutableStateOf<StatsResult?>(null) }
     var isStatsLoading by remember { mutableStateOf(false) }
 
@@ -177,7 +178,13 @@ fun MainScreen(viewModel: MainViewModel) {
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
-                    title = { Text(title, maxLines = 1) },
+                    title = {
+                        Text(
+                            title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Filled.Menu, contentDescription = "菜单")
@@ -188,78 +195,112 @@ fun MainScreen(viewModel: MainViewModel) {
                     ),
                     actions = {
                     if (isFileOpen) {
-                        Row(
-                            Modifier.horizontalScroll(rememberScrollState()),
-                            verticalAlignment = Alignment.CenterVertically
+                        // Essential actions always visible
+                        IconButton(onClick = { viewModel.toggleSearch() }) {
+                            Icon(Icons.Filled.Search, contentDescription = "搜索")
+                        }
+                        IconButton(
+                            onClick = {
+                                val et = editTextRef.value ?: return@IconButton
+                                val result = viewModel.undoManager.prepareUndo()
+                                if (result != null) {
+                                    try {
+                                        et.setText(result)
+                                    } finally {
+                                        viewModel.undoManager.finishUndoRedo()
+                                    }
+                                }
+                            },
+                            enabled = viewModel.canUndo
                         ) {
-                            IconButton(onClick = { viewModel.toggleSearch() }) {
-                                Icon(Icons.Filled.Search, contentDescription = "搜索")
-                            }
-                            IconButton(
-                                onClick = {
-                                    val et = editTextRef.value ?: return@IconButton
-                                    val result = viewModel.undoManager.prepareUndo()
-                                    if (result != null) {
-                                        try {
-                                            et.setText(result)
-                                        } finally {
-                                            viewModel.undoManager.finishUndoRedo()
-                                        }
+                            Icon(Icons.Filled.Undo, contentDescription = "撤销")
+                        }
+                        IconButton(
+                            onClick = {
+                                val et = editTextRef.value ?: return@IconButton
+                                val result = viewModel.undoManager.prepareRedo()
+                                if (result != null) {
+                                    try {
+                                        et.setText(result)
+                                    } finally {
+                                        viewModel.undoManager.finishUndoRedo()
                                     }
-                                },
-                                enabled = viewModel.canUndo
-                            ) {
-                                Icon(Icons.Filled.Undo, contentDescription = "撤销")
+                                }
+                            },
+                            enabled = viewModel.canRedo
+                        ) {
+                            Icon(Icons.Filled.Redo, contentDescription = "重做")
+                        }
+                        IconButton(
+                            onClick = {
+                                if (currentUri != null) {
+                                    viewModel.saveFile()
+                                } else {
+                                    saveAsLauncher.launch("new_file.txt")
+                                }
+                            },
+                            enabled = isModified
+                        ) {
+                            Icon(Icons.Filled.Save, contentDescription = "保存")
+                        }
+                        // Overflow menu for less-used actions
+                        Box {
+                            IconButton(onClick = { showOverflowMenu = true }) {
+                                Icon(
+                                    Icons.Filled.Settings,
+                                    contentDescription = "更多操作"
+                                )
                             }
-                            IconButton(
-                                onClick = {
-                                    val et = editTextRef.value ?: return@IconButton
-                                    val result = viewModel.undoManager.prepareRedo()
-                                    if (result != null) {
-                                        try {
-                                            et.setText(result)
-                                        } finally {
-                                            viewModel.undoManager.finishUndoRedo()
-                                        }
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("复制行号") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val lines = content.lines()
+                                        val sb = StringBuilder(lines.size * 8)
+                                        for (i in lines.indices) sb.append(i + 1).append('\n')
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
                                     }
-                                },
-                                enabled = viewModel.canRedo
-                            ) {
-                                Icon(Icons.Filled.Redo, contentDescription = "重做")
-                            }
-                            IconButton(onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val lines = content.lines()
-                                val sb = StringBuilder(lines.size * 8)
-                                for (i in lines.indices) sb.append(i + 1).append('\n')
-                                clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
-                            }) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = "复制行号")
-                            }
-                            IconButton(onClick = { showGoToLineDialog = true }) {
-                                Icon(Icons.Filled.Numbers, contentDescription = "跳转到行")
-                            }
-                            IconButton(onClick = {
-                                showStatsDialog = true
-                                isStatsLoading = true
-                                statsResult = null
-                            }) {
-                                Icon(Icons.Filled.BarChart, contentDescription = "统计")
-                            }
-                            IconButton(onClick = { showSettingsDialog = true }) {
-                                Icon(Icons.Filled.Settings, contentDescription = "设置")
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (currentUri != null) {
-                                        viewModel.saveFile()
-                                    } else {
-                                        saveAsLauncher.launch("new_file.txt")
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("跳转到行") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showGoToLineDialog = true
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Numbers, contentDescription = null)
                                     }
-                                },
-                                enabled = isModified
-                            ) {
-                                Icon(Icons.Filled.Save, contentDescription = "保存")
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("文本统计") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showStatsDialog = true
+                                        isStatsLoading = true
+                                        statsResult = null
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.BarChart, contentDescription = null)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("设置") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showSettingsDialog = true
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Settings, contentDescription = null)
+                                    }
+                                )
                             }
                         }
                     } else {
@@ -1010,11 +1051,25 @@ private fun computeStats(text: String): StatsResult {
     )
 }
 
-// ── Gutter-colour helper: returns light/dark-appropriate colours ──
+// ── Gutter and editor colour helpers: returns light/dark-appropriate colours ──
 private fun gutterColors(isDark: Boolean) = if (isDark) {
     Triple(0xFF1E1E1E.toInt(), 0xFF3A3A3A.toInt(), 0xFF888888.toInt())
 } else {
     Triple(0xFFF0F0F0.toInt(), 0xFFD0D0D0.toInt(), 0xFF888888.toInt())
+}
+
+private fun editorColors(isDark: Boolean) = if (isDark) {
+    Triple(
+        0xFF212121.toInt(),  // text color: light gray (not pure white, better for eyes)
+        0xFF1E1E1E.toInt(),  // background color: dark
+        0xFFBB86FC.toInt()   // cursor/handle color: accent purple
+    )
+} else {
+    Triple(
+        0xFF1F1F1F.toInt(),  // text color: near black
+        0xFFFFFFFF.toInt(),  // background color: white
+        0xFF6650A4.toInt()   // cursor/handle color: accent purple
+    )
 }
 
 /**
@@ -1046,24 +1101,40 @@ class LinedEditText(
         gutterWidthPx = 48f * density
         gutterMarginPx = 6f * density
         lineNumberPaint.textSize = 12f * density
-        updateGutterColors()
+        updateAllColors()
         updatePadding()
         isFocusable = true
         isFocusableInTouchMode = true
     }
 
-    private fun updateGutterColors() {
-        val isDark = try {
-            val tv = TypedValue()
-            context.theme.resolveAttribute(android.R.attr.isLightTheme, tv, true)
-            !tv.data.let { it != 0 }
-        } catch (_: Exception) {
-            false
-        }
+    /** Detect system dark mode from Configuration */
+    private fun isSystemInDarkMode(): Boolean {
+        val nightMode = resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+
+    private fun updateAllColors() {
+        val isDark = isSystemInDarkMode()
+
+        // ── gutter colours ──
         val (bg, div, num) = gutterColors(isDark)
         gutterBgPaint.color = bg
         gutterDividerPaint.color = div
         lineNumberPaint.color = num
+
+        // ── editor text & background colours ──
+        val (textCol, backCol, accentCol) = editorColors(isDark)
+        setTextColor(textCol)
+        setBackgroundColor(backCol)
+        // highlight color (selection)
+        highlightColor = (0x66333333).toInt()  // subtle selection highlight
+        // cursor / text-select handle colour
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                textCursorDrawable?.setTint(accentCol)
+            }
+        } catch (_: Exception) {}
     }
 
     private fun updatePadding() {
@@ -1082,6 +1153,13 @@ class LinedEditText(
             updatePadding()
             invalidate()
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
+        super.onConfigurationChanged(newConfig)
+        // Re-apply colours when system switches between light/dark mode
+        updateAllColors()
+        invalidate()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

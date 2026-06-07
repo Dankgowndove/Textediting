@@ -60,7 +60,9 @@ fun FileTreeSidebar(
             title = {
                 Text(
                     text = if (fileTreeState.rootUri != null) "文件浏览器" else "工作区",
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             },
             navigationIcon = {
