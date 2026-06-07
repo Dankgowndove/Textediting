@@ -103,6 +103,7 @@ fun MainScreen(viewModel: MainViewModel) {
 
     val editTextRef = remember { mutableStateOf<LinedEditText?>(null) }
     val isKeyboardVisible = remember { mutableStateOf(false) }
+    var ignoreTextChange by remember { mutableStateOf(false) }
 
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -124,6 +125,27 @@ fun MainScreen(viewModel: MainViewModel) {
         viewModel.pendingScrollToLine.collect { line ->
             kotlinx.coroutines.delay(150)
             editTextRef.value?.scrollToLine(line)
+        }
+    }
+
+    // Handle external text changes (file open, undo/redo, tab switch, etc.)
+    // Skip when the change was triggered by user input (ignoreTextChange flag)
+    LaunchedEffect(content) {
+        if (ignoreTextChange) {
+            ignoreTextChange = false
+            return@LaunchedEffect
+        }
+        editTextRef.value?.let { et ->
+            if (et.text?.toString() != content) {
+                val hadFocus = et.hasFocus()
+                val selStart = et.selectionStart
+                val selEnd = et.selectionEnd
+                et.setText(content)
+                if (selStart in 0..content.length && selEnd in selStart..content.length) {
+                    et.setSelection(selStart, selEnd)
+                }
+                if (hadFocus) et.requestFocus()
+            }
         }
     }
 
@@ -402,8 +424,9 @@ fun MainScreen(viewModel: MainViewModel) {
                                 et.typeface = android.graphics.Typeface.MONOSPACE
                                 et.hint = "在此输入文本..."
                                 et.setHorizontallyScrolling(!wordWrap)
-                                et.maxLines = Integer.MAX_VALUE
                                 et.gravity = Gravity.TOP
+                                et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
+                                        EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
 
                                 // IME action: handle keyboard dismiss via back key
                                 et.setOnEditorActionListener { _, actionId, event ->
@@ -428,6 +451,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     ) {}
 
                                     override fun afterTextChanged(s: Editable) {
+                                        ignoreTextChange = true
                                         viewModel.onTextChanged(s.toString())
                                     }
                                 })
@@ -437,18 +461,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         },
                         update = { et ->
-                            if (et.text?.toString() != content) {
-                                val hadFocus = et.hasFocus()
-                                val selStart = et.selectionStart
-                                val selEnd = et.selectionEnd
-                                et.setText(content)
-                                // Restore cursor position if possible
-                                if (selStart in 0..content.length && selEnd in selStart..content.length) {
-                                    et.setSelection(selStart, selEnd)
-                                }
-                                if (hadFocus) et.requestFocus()
-                            }
-                            // Update settings-driven properties
+                            // Only update non-text properties — never call setText here
                             if (et.textSize != fontSize.toFloat()) {
                                 et.textSize = fontSize.toFloat()
                             }
@@ -1229,10 +1242,10 @@ class LinedEditText(
         canvas.drawRect(clipLeft, clipTop, clipRight, clipBottom, gutterBgPaint)
         canvas.drawLine(gutterWidthPx, clipTop, gutterWidthPx, clipBottom, gutterDividerPaint)
 
-        // Only draw the line numbers that are currently visible
-        val firstVisibleLine = maxOf(0, layout.getLineForVertical(scrollY))
+        // Draw visible line numbers with safety margin to prevent edge-case clipping
+        val firstVisibleLine = maxOf(0, layout.getLineForVertical(scrollY) - 2)
         val contentBottom = scrollY + viewHeight
-        val lastVisibleLine = minOf(layout.lineCount - 1, layout.getLineForVertical(contentBottom))
+        val lastVisibleLine = minOf(layout.lineCount - 1, layout.getLineForVertical(contentBottom) + 2)
 
         val padTop = paddingTop.toFloat()
         val scrollYf = scrollY.toFloat()
