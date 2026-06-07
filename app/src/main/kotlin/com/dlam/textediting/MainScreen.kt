@@ -54,7 +54,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
@@ -403,13 +402,6 @@ fun MainScreen(viewModel: MainViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .focusable(true)
-                        .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                awaitPointerEvent()
-                                // Tapping the background dismisses the keyboard
-                                dismissKeyboard()
-                            }
-                        }
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
@@ -419,14 +411,18 @@ fun MainScreen(viewModel: MainViewModel) {
                     AndroidView(
                         factory = { ctx ->
                             LinedEditText(ctx, showLineNumbers = showLineNumbers).also { et ->
+                                // inputType MUST be set first — it resets internal flags
+                                et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
+                                        EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                                et.setHorizontallyScrolling(!wordWrap)
+                                et.gravity = Gravity.TOP
                                 et.isVerticalScrollBarEnabled = true
+                                et.movementMethod = android.text.method.ScrollingMovementMethod()
                                 et.textSize = fontSize.toFloat()
                                 et.typeface = android.graphics.Typeface.MONOSPACE
                                 et.hint = "在此输入文本..."
-                                et.setHorizontallyScrolling(!wordWrap)
-                                et.gravity = Gravity.TOP
-                                et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
-                                        EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                                et.maxLines = Int.MAX_VALUE
+                                et.minLines = 1
 
                                 // IME action: handle keyboard dismiss via back key
                                 et.setOnEditorActionListener { _, actionId, event ->
@@ -461,11 +457,12 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         },
                         update = { et ->
-                            // Only update non-text properties — never call setText here
                             if (et.textSize != fontSize.toFloat()) {
                                 et.textSize = fontSize.toFloat()
                             }
-                            et.setHorizontallyScrolling(!wordWrap)
+                            if (et.isHorizontallyScrolling != !wordWrap) {
+                                et.setHorizontallyScrolling(!wordWrap)
+                            }
                             et.setShowLineNumbers(showLineNumbers)
                         },
                         modifier = Modifier.fillMaxSize()
