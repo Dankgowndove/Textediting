@@ -411,10 +411,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             if (et.textSize != fontSize.toFloat()) {
                                 et.textSize = fontSize.toFloat()
                             }
-                            val shouldWrap = !wordWrap
-                            if (et.isHorizontallyScrolling != shouldWrap) {
-                                et.setHorizontallyScrolling(shouldWrap)
-                            }
+                            et.setHorizontallyScrolling(!wordWrap)
                             et.setShowLineNumbers(showLineNumbers)
                         },
                         modifier = Modifier.fillMaxSize()
