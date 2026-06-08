@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.dlam.textediting.dialogs.GlobalReplaceDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -561,72 +562,3 @@ private fun GlobalSearchPanel(
     }
 }
 
-@Composable
-private fun GlobalReplaceDialog(
-    onDismiss: () -> Unit,
-    onReplace: (find: String, replace: String, onlyCurrentFile: Boolean) -> Unit
-) {
-    var find by remember { mutableStateOf("") }
-    var replace by remember { mutableStateOf("") }
-    var onlyCurrent by remember { mutableStateOf(true) }
-    var showConfirm by remember { mutableStateOf(false) }
-
-    if (showConfirm) {
-        AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            title = { Text("确认替换") },
-            text = {
-                Text(
-                    if (onlyCurrent) "将替换当前文件中所有「${find}」为「${replace}」，此操作不可逆。"
-                    else "将替换根目录下所有文本文件中的「${find}」为「${replace}」，此操作不可逆。"
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showConfirm = false
-                    onReplace(find, replace, onlyCurrent)
-                }) { Text("确认执行", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) { Text("取消") }
-            }
-        )
-    } else {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("全局替换") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = find,
-                        onValueChange = { find = it },
-                        label = { Text("查找内容") },
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = replace,
-                        onValueChange = { replace = it },
-                        label = { Text("替换为") },
-                        singleLine = true
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = onlyCurrent,
-                            onCheckedChange = { onlyCurrent = it }
-                        )
-                        Text("仅替换当前文件", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { showConfirm = true },
-                    enabled = find.isNotBlank()
-                ) { Text("替换") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismiss) { Text("取消") }
-            }
-        )
-    }
-}
