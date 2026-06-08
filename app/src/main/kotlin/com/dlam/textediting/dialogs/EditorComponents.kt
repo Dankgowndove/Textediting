@@ -3,8 +3,8 @@ package com.dlam.textediting.dialogs
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.item
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -172,7 +172,7 @@ fun TabBar(
                 }
             }
             if (tabs.size >= maxTabs) {
-                item {
+                items(1) {
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 8.dp, vertical = 6.dp)

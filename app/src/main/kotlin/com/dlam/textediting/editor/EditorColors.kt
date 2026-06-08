@@ -19,7 +19,7 @@ internal data class EditorColors(
     val highlight: Int
 )
 
-fun gutterColors(isDark: Boolean): GutterColors = if (isDark) {
+internal fun gutterColors(isDark: Boolean): GutterColors = if (isDark) {
     GutterColors(
         background = 0xFF1A1A1A.toInt(),
         divider = 0xFF3A3A3A.toInt(),
@@ -33,7 +33,7 @@ fun gutterColors(isDark: Boolean): GutterColors = if (isDark) {
     )
 }
 
-fun editorColors(isDark: Boolean): EditorColors = if (isDark) {
+internal fun editorColors(isDark: Boolean): EditorColors = if (isDark) {
     EditorColors(
         text = 0xFFEEEEEE.toInt(),
         background = 0xFF121212.toInt(),
