@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +37,7 @@ fun FileTreeSidebar(
     val globalSearchQuery by viewModel.globalSearchQuery.collectAsState()
     val globalSearchResults by viewModel.globalSearchResults.collectAsState()
     val isGlobalSearching by viewModel.isGlobalSearching.collectAsState()
+    val recentFilesList by viewModel.recentFiles.recentFiles.collectAsState()
 
     var showGlobalSearch by remember { mutableStateOf(false) }
     var showNewFileDialog by remember { mutableStateOf(false) }
@@ -128,27 +131,74 @@ fun FileTreeSidebar(
                 }
             }
             fileTreeState.rootUri == null -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.FolderOpen,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(16.dp))
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Filled.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "请选择工作区目录",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            FilledTonalButton(onClick = { rootDirLauncher.launch(null) }) {
+                                Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("选择目录")
+                            }
+                        }
+                    }
+
+                    // Recent files
+                    if (recentFilesList.isNotEmpty()) {
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                         Text(
-                            "请选择工作区目录",
-                            style = MaterialTheme.typography.bodyLarge
+                            "最近打开",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)
                         )
-                        Spacer(Modifier.height(8.dp))
-                        FilledTonalButton(onClick = { rootDirLauncher.launch(null) }) {
-                            Icon(Icons.Filled.FolderOpen, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("选择目录")
+                        recentFilesList.take(15).forEach { recent ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 1.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        viewModel.openFile(recent.uri)
+                                        onClose()
+                                    },
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.History,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        recent.displayName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
                 }

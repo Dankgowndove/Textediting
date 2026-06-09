@@ -1,6 +1,8 @@
 package com.dlam.textediting.dialogs
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,6 +19,10 @@ fun SettingsDialog(
     val showLineNumbers by settings.showLineNumbers.collectAsState()
     val wordWrap by settings.wordWrap.collectAsState()
     val autoSaveInterval by settings.autoSaveInterval.collectAsState()
+    val syntaxHighlight by settings.syntaxHighlight.collectAsState()
+    val bracketMatching by settings.bracketMatching.collectAsState()
+    val highlightCurrentLine by settings.highlightCurrentLine.collectAsState()
+    val showWhitespace by settings.showWhitespace.collectAsState()
 
     var showFontSizeMenu by remember { mutableStateOf(false) }
     var showMaxTabsMenu by remember { mutableStateOf(false) }
@@ -34,7 +40,10 @@ fun SettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("设置") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 // ── Font Size ──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -134,6 +143,66 @@ fun SettingsDialog(
                     Switch(
                         checked = wordWrap,
                         onCheckedChange = { settings.setWordWrap(it) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── Syntax Highlighting ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("语法高亮", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = syntaxHighlight,
+                        onCheckedChange = { settings.setSyntaxHighlight(it) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── Bracket Matching ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("括号匹配", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = bracketMatching,
+                        onCheckedChange = { settings.setBracketMatching(it) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── Current Line Highlight ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("当前行高亮", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = highlightCurrentLine,
+                        onCheckedChange = { settings.setHighlightCurrentLine(it) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── Show Whitespace ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("显示空白字符", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = showWhitespace,
+                        onCheckedChange = { settings.setShowWhitespace(it) }
                     )
                 }
 

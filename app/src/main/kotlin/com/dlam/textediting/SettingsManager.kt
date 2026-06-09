@@ -60,6 +60,42 @@ class SettingsManager(context: Context) {
         prefs.edit().putInt(KEY_AUTO_SAVE, seconds).apply()
     }
 
+    // ── syntax highlighting ──
+    private val _syntaxHighlight = MutableStateFlow(prefs.getBoolean(KEY_SYNTAX_HIGHLIGHT, true))
+    val syntaxHighlight: StateFlow<Boolean> = _syntaxHighlight.asStateFlow()
+
+    fun setSyntaxHighlight(enabled: Boolean) {
+        _syntaxHighlight.value = enabled
+        prefs.edit().putBoolean(KEY_SYNTAX_HIGHLIGHT, enabled).apply()
+    }
+
+    // ── bracket matching ──
+    private val _bracketMatching = MutableStateFlow(prefs.getBoolean(KEY_BRACKET_MATCHING, true))
+    val bracketMatching: StateFlow<Boolean> = _bracketMatching.asStateFlow()
+
+    fun setBracketMatching(enabled: Boolean) {
+        _bracketMatching.value = enabled
+        prefs.edit().putBoolean(KEY_BRACKET_MATCHING, enabled).apply()
+    }
+
+    // ── current line highlight ──
+    private val _highlightCurrentLine = MutableStateFlow(prefs.getBoolean(KEY_HIGHLIGHT_CURRENT_LINE, true))
+    val highlightCurrentLine: StateFlow<Boolean> = _highlightCurrentLine.asStateFlow()
+
+    fun setHighlightCurrentLine(enabled: Boolean) {
+        _highlightCurrentLine.value = enabled
+        prefs.edit().putBoolean(KEY_HIGHLIGHT_CURRENT_LINE, enabled).apply()
+    }
+
+    // ── show whitespace ──
+    private val _showWhitespace = MutableStateFlow(prefs.getBoolean(KEY_SHOW_WHITESPACE, false))
+    val showWhitespace: StateFlow<Boolean> = _showWhitespace.asStateFlow()
+
+    fun setShowWhitespace(enabled: Boolean) {
+        _showWhitespace.value = enabled
+        prefs.edit().putBoolean(KEY_SHOW_WHITESPACE, enabled).apply()
+    }
+
     fun getAllFontSizes(): List<Int> = FONT_SIZE_OPTIONS
     fun getAllMaxTabs(): List<Int> = MAX_TABS_OPTIONS
     fun getAllAutoSaveIntervals(): List<Int> = AUTO_SAVE_OPTIONS
@@ -70,6 +106,10 @@ class SettingsManager(context: Context) {
         private const val KEY_SHOW_LINE_NUMBERS = "show_line_numbers"
         private const val KEY_WORD_WRAP = "word_wrap"
         private const val KEY_AUTO_SAVE = "auto_save_interval"
+        private const val KEY_SYNTAX_HIGHLIGHT = "syntax_highlight"
+        private const val KEY_BRACKET_MATCHING = "bracket_matching"
+        private const val KEY_HIGHLIGHT_CURRENT_LINE = "highlight_current_line"
+        private const val KEY_SHOW_WHITESPACE = "show_whitespace"
 
         const val DEFAULT_FONT_SIZE = 14
         const val DEFAULT_MAX_TABS = 10

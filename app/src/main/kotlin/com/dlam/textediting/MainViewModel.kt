@@ -22,6 +22,7 @@ import java.io.InputStreamReader
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val settings by lazy { SettingsManager(application) }
+    val recentFiles by lazy { RecentFilesManager(application) }
 
     private val _textContent = MutableStateFlow("")
     val textContent: StateFlow<String> = _textContent.asStateFlow()
@@ -89,7 +90,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingScrollToLine = MutableSharedFlow<Int>()
     val pendingScrollToLine: SharedFlow<Int> = _pendingScrollToLine.asSharedFlow()
 
+    /** Whether syntax highlighting is currently active for the current file. */
+    private val _syntaxHighlightingActive = MutableStateFlow(false)
+    val syntaxHighlightingActive: StateFlow<Boolean> = _syntaxHighlightingActive.asStateFlow()
+
     private var refreshJob: kotlinx.coroutines.Job? = null
+    private var autoSaveJob: kotlinx.coroutines.Job? = null
+    private var highlightJob: kotlinx.coroutines.Job? = null
 
     private var clipboardUri: Uri? = null
 
@@ -129,6 +136,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 undoManager.clear()
                 undoManager.record(text)
                 addOrSwitchTab(uri, name, text)
+                recentFiles.recordFile(uri, name)
                 _snackbarEvent.emit("已打开：$name")
             } catch (e: Exception) {
                 _snackbarEvent.emit("打开失败：${e.message}")
@@ -889,5 +897,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         return uri.lastPathSegment ?: "未知文件"
+    }
+
+    // ── auto-save ──
+
+    /**
+     * Start or restart the auto-save timer based on the current [SettingsManager.autoSaveInterval].
+     * Call this from Compose via LaunchedEffect whenever the interval or modified state changes.
+     */
+    fun scheduleAutoSave() {
+        cancelAutoSave()
+        val interval = settings.autoSaveInterval.value
+        if (interval <= 0 || !_isModified.value) return
+        autoSaveJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(interval * 1000L)
+            if (_isModified.value && _currentUri.value != null) {
+                saveFile()
+            }
+        }
+    }
+
+    fun cancelAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = null
+    }
+
+    // ── syntax highlighting trigger ──
+
+    /** Emitted when new highlight commands are ready to be applied. */
+    private val _highlightsReady = MutableSharedFlow<Unit>()
+    val highlightsReady: SharedFlow<Unit> = _highlightsReady.asSharedFlow()
+
+    /** Called by the UI when it wants to re-run syntax highlighting for the current text. */
+    fun triggerSyntaxHighlight(text: CharSequence, fileName: String, darkMode: Boolean) {
+        val rules = com.dlam.textediting.editor.SyntaxHighlighter.detectLanguage(fileName)
+        if (rules == null || !settings.syntaxHighlight.value) {
+            _syntaxHighlightingActive.value = false
+            return
+        }
+        _syntaxHighlightingActive.value = true
+        highlightJob?.cancel()
+        highlightJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                kotlinx.coroutines.delay(300) // debounce
+                val commands = com.dlam.textediting.editor.SyntaxHighlighter.analyse(text, rules)
+                withContext(Dispatchers.Main) {
+                    _lastHighlightCommands = commands
+                    _lastHighlightDark = darkMode
+                    _highlightsReady.emit(Unit)
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                // expected
+            } catch (_: Exception) {
+                _syntaxHighlightingActive.value = false
+            }
+        }
+    }
+
+    /** Latest highlight commands — read by MainScreen to apply to the EditText. */
+    private var _lastHighlightCommands: List<com.dlam.textediting.editor.SyntaxHighlighter.SpanCommand> = emptyList()
+    private var _lastHighlightDark: Boolean = false
+
+    fun applyHighlightIfReady(spannable: android.text.Spannable, darkMode: Boolean) {
+        if (_lastHighlightCommands.isEmpty()) return
+        com.dlam.textediting.editor.SyntaxHighlighter.clearSpans(spannable)
+        com.dlam.textediting.editor.SyntaxHighlighter.applyTo(spannable, _lastHighlightCommands, _lastHighlightDark)
     }
 }

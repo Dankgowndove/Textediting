@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.text.Editable
+import android.text.Spannable
 import android.text.TextWatcher
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
@@ -16,13 +17,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dlam.textediting.dialogs.*
 import com.dlam.textediting.editor.LinedEditText
+import com.dlam.textediting.editor.SyntaxHighlighter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,6 +60,12 @@ fun MainScreen(viewModel: MainViewModel) {
     val showLineNumbers by viewModel.settings.showLineNumbers.collectAsState()
     val wordWrap by viewModel.settings.wordWrap.collectAsState()
     val maxTabs by viewModel.settings.maxTabs.collectAsState()
+    val syntaxHighlight by viewModel.settings.syntaxHighlight.collectAsState()
+    val bracketMatching by viewModel.settings.bracketMatching.collectAsState()
+    val highlightCurrentLine by viewModel.settings.highlightCurrentLine.collectAsState()
+    val showWhitespace by viewModel.settings.showWhitespace.collectAsState()
+    val autoSaveInterval by viewModel.settings.autoSaveInterval.collectAsState()
+    val recentFilesList by viewModel.recentFiles.recentFiles.collectAsState()
 
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -98,8 +109,29 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    // ── Auto-save timer ──
+    LaunchedEffect(isModified, autoSaveInterval, currentUri) {
+        viewModel.scheduleAutoSave()
+    }
+
+    // ── Syntax highlighting trigger ──
+    LaunchedEffect(content, fileName, syntaxHighlight) {
+        if (syntaxHighlight && content.isNotEmpty() && fileName.isNotEmpty()) {
+            viewModel.triggerSyntaxHighlight(content, fileName, isDarkMode)
+        }
+    }
+
+    // ── Apply syntax highlighting when results are ready ──
+    LaunchedEffect(Unit) {
+        viewModel.highlightsReady.collect {
+            editTextRef.value?.let { et ->
+                val spannable = et.text as? Spannable ?: return@collect
+                viewModel.applyHighlightIfReady(spannable, isDarkMode)
+            }
+        }
+    }
+
     // Handle external text changes (file open, undo/redo, tab switch).
-    // Skip when the change was triggered by user input (ignoreTextChange flag).
     LaunchedEffect(content) {
         if (ignoreTextChange) {
             ignoreTextChange = false
@@ -178,7 +210,6 @@ fun MainScreen(viewModel: MainViewModel) {
                     ),
                     actions = {
                         if (isFileOpen) {
-                            // Essential actions always visible
                             IconButton(onClick = { viewModel.toggleSearch() }) {
                                 Icon(Icons.Filled.Search, contentDescription = "搜索")
                             }
@@ -226,7 +257,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             ) {
                                 Icon(Icons.Filled.Save, contentDescription = "保存")
                             }
-                            // Overflow menu for secondary actions
+                            // Overflow menu
                             Box {
                                 IconButton(onClick = { showOverflowMenu = true }) {
                                     Icon(Icons.Filled.Settings, contentDescription = "更多操作")
@@ -245,9 +276,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             for (i in lines.indices) sb.append(i + 1).append('\n')
                                             clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
                                         },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                                        }
+                                        leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("跳转到行") },
@@ -255,9 +284,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             showOverflowMenu = false
                                             showGoToLineDialog = true
                                         },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.Numbers, contentDescription = null)
-                                        }
+                                        leadingIcon = { Icon(Icons.Filled.Numbers, contentDescription = null) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("文本统计") },
@@ -265,9 +292,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             showOverflowMenu = false
                                             showStatsDialog = true
                                         },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.BarChart, contentDescription = null)
-                                        }
+                                        leadingIcon = { Icon(Icons.Filled.BarChart, contentDescription = null) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("设置") },
@@ -275,9 +300,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             showOverflowMenu = false
                                             showSettingsDialog = true
                                         },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.Settings, contentDescription = null)
-                                        }
+                                        leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) }
                                     )
                                 }
                             }
@@ -342,6 +365,12 @@ fun MainScreen(viewModel: MainViewModel) {
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "文本编辑器",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(24.dp))
                             FilledTonalButton(
                                 onClick = { openFileLauncher.launch(arrayOf("*/*")) }
                             ) {
@@ -349,11 +378,59 @@ fun MainScreen(viewModel: MainViewModel) {
                                 Spacer(Modifier.width(8.dp))
                                 Text("打开文件")
                             }
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(12.dp))
                             FilledTonalButton(
                                 onClick = { viewModel.createNewFile() }
                             ) {
                                 Text("新建文件")
+                            }
+
+                            // ── Recent files ──
+                            if (recentFilesList.isNotEmpty()) {
+                                Spacer(Modifier.height(32.dp))
+                                Text(
+                                    "最近打开",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .widthIn(max = 420.dp)
+                                        .heightIn(max = 240.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    items(recentFilesList.take(10)) { recent ->
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { viewModel.openFile(recent.uri) },
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            tonalElevation = 0.dp
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Description,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(Modifier.width(12.dp))
+                                                Text(
+                                                    recent.displayName,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -371,7 +448,6 @@ fun MainScreen(viewModel: MainViewModel) {
                         AndroidView(
                             factory = { ctx ->
                                 LinedEditText(ctx).also { et ->
-                                    // Configure editor
                                     et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
                                             EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                                     et.setHorizontallyScrolling(!wordWrap)
@@ -383,8 +459,11 @@ fun MainScreen(viewModel: MainViewModel) {
                                     et.minLines = 1
                                     et.showLineNumbers = showLineNumbers
                                     et.darkMode = isDarkMode
+                                    et.highlightCurrentLine = highlightCurrentLine
+                                    et.bracketMatching = bracketMatching
+                                    et.showWhitespace = showWhitespace
 
-                                    // IME action: dismiss keyboard on back
+                                    // IME action
                                     et.setOnEditorActionListener { _, actionId, event ->
                                         if (actionId == EditorInfo.IME_ACTION_DONE ||
                                             (event?.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP)
@@ -424,6 +503,9 @@ fun MainScreen(viewModel: MainViewModel) {
                                 et.setHorizontallyScrolling(!wordWrap)
                                 et.showLineNumbers = showLineNumbers
                                 et.darkMode = isDarkMode
+                                et.highlightCurrentLine = highlightCurrentLine
+                                et.bracketMatching = bracketMatching
+                                et.showWhitespace = showWhitespace
                             },
                             modifier = Modifier.fillMaxSize()
                         )
