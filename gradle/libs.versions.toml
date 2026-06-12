@@ -1,21 +1,41 @@
+# ══════════════════════════════════════════════════════════
+# Gradle 版本目录（Version Catalog）
+#
+# 集中管理所有依赖版本，确保整个项目依赖版本一致性。
+# 使用 TOML 格式，分为 [versions]、[plugins]、[libraries] 三部分。
+# ══════════════════════════════════════════════════════════
+
 [versions]
-agp = "8.13.0"
-kotlin = "2.1.0"
-coreKtx = "1.17.0"
-lifecycleRuntimeKtx = "2.9.2"
-activityCompose = "1.11.0"
-appcompat = "1.7.0"
-composeBom = "2025.10.01"
-documentfile = "1.0.1"
+# 构建工具
+agp = "8.13.0"          # Android Gradle Plugin
+kotlin = "2.1.0"        # Kotlin 编译器版本
+
+# AndroidX 核心库
+coreKtx = "1.17.0"                 # AndroidX Core KTX
+lifecycleRuntimeKtx = "2.9.2"     # Lifecycle Runtime KTX
+activityCompose = "1.11.0"        # Activity Compose 集成
+appcompat = "1.7.0"               # AppCompat
+
+# Compose
+composeBom = "2025.10.01"         # Compose BOM（统一管理 Compose 库版本）
+
+# 文件访问
+documentfile = "1.0.1"            # SAF DocumentFile
 
 [plugins]
+# Android 应用插件
 android-application = { id = "com.android.application", version.ref = "agp" }
+# Kotlin Android 插件
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# Kotlin Compose 编译器插件
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 
 [libraries]
+# AndroidX 核心
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+
+# Compose 相关
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
@@ -24,6 +44,10 @@ androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# 开发调试（仅在 debug 构建中使用）
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+
+# SAF 文件访问
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }

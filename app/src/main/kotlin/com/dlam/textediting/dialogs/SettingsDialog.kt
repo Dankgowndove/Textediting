@@ -9,11 +9,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/**
+ * 设置对话框
+ *
+ * 提供所有用户可配置选项的 UI，包括：
+ * - 字体大小、最大标签数、自动保存间隔（下拉菜单选择）
+ * - 行号显示、自动换行、语法高亮、括号匹配等（开关切换）
+ *
+ * 所有设置实时生效，无需重启应用。变更通过 SettingsManager
+ * 同步更新 StateFlow 和 SharedPreferences。
+ *
+ * @param settings 设置管理器实例
+ * @param onDismiss 关闭对话框回调
+ */
 @Composable
 fun SettingsDialog(
     settings: com.dlam.textediting.SettingsManager,
     onDismiss: () -> Unit
 ) {
+    // ── 从 SettingsManager 收集所有设置状态 ──
     val fontSize by settings.fontSize.collectAsState()
     val maxTabs by settings.maxTabs.collectAsState()
     val showLineNumbers by settings.showLineNumbers.collectAsState()
@@ -24,10 +38,12 @@ fun SettingsDialog(
     val highlightCurrentLine by settings.highlightCurrentLine.collectAsState()
     val showWhitespace by settings.showWhitespace.collectAsState()
 
+    // ── 下拉菜单展开状态 ──
     var showFontSizeMenu by remember { mutableStateOf(false) }
     var showMaxTabsMenu by remember { mutableStateOf(false) }
     var showAutoSaveMenu by remember { mutableStateOf(false) }
 
+    // 自动保存间隔 → 显示标签映射
     val autoSaveLabels = mapOf(
         0 to "关闭",
         30 to "30 秒",
@@ -41,10 +57,11 @@ fun SettingsDialog(
         title = { Text("设置") },
         text = {
             Column(
+                // 设置过多时允许垂直滚动
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // ── Font Size ──
+                // ── 字体大小（下拉菜单）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -64,6 +81,7 @@ fun SettingsDialog(
                                     text = {
                                         Text(
                                             "${size}sp",
+                                            // 当前值加粗显示
                                             fontWeight = if (size == fontSize) {
                                                 androidx.compose.ui.text.font.FontWeight.Bold
                                             } else androidx.compose.ui.text.font.FontWeight.Normal
@@ -81,7 +99,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Max Tabs ──
+                // ── 最大标签数（下拉菜单）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -118,7 +136,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Show Line Numbers ──
+                // ── 显示行号（开关）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -133,7 +151,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Word Wrap ──
+                // ── 自动换行（开关）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -148,7 +166,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Syntax Highlighting ──
+                // ── 语法高亮（开关）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -163,7 +181,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Bracket Matching ──
+                // ── 括号匹配（开关）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -178,7 +196,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Current Line Highlight ──
+                // ── 当前行高亮（开关）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -193,7 +211,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Show Whitespace ──
+                // ── 显示空白字符（开关）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -208,7 +226,7 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── Auto-save ──
+                // ── 自动保存（下拉菜单）──
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -246,6 +264,7 @@ fun SettingsDialog(
                     }
                 }
 
+                // 提示：设置实时生效
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "设置实时生效，无需重启应用",

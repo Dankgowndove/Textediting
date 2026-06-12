@@ -16,44 +16,48 @@ import android.view.inputmethod.InputMethodManager
 import androidx.appcompat.widget.AppCompatEditText
 
 /**
- * A text editor widget with a line-number gutter, current-line highlight, and
- * bracket-matching drawn on top of the standard EditText content.
+ * 带行号栏、当前行高亮和括号匹配的自定义文本编辑器控件
  *
- * **Gutter drawing:**
- * - Only visible lines + 3-line buffer are drawn — constant cost regardless of file size.
- * - Line numbers use a reusable [CharArray] to avoid per-frame allocations.
- * - The gutter is drawn **after** [super.onDraw] so numbers always sit on top.
+ * 继承 [AppCompatEditText]，通过 Canvas 直接绘制行号栏和相关视觉元素。
  *
- * **Current-line highlight:**
- * - A subtle background bar spans the full width of the current cursor line.
- * - Drawn **before** [super.onDraw] so text and selection render on top.
+ * ## 行号栏绘制
+ * - 仅绘制可见行 + 3 行缓冲区 — 无论文件多大都是常量开销
+ * - 使用可复用 [CharArray] 实现零分配行号格式化
+ * - 行号栏在 [super.onDraw] **之后**绘制，确保数字始终位于最上层
  *
- * **Bracket matching:**
- * - When the cursor is immediately after an opening or closing bracket — `()[]{}` —
- *   the matching partner is highlighted via a temporary [BackgroundColorSpan].
- * - The span is cleared whenever the selection moves again.
+ * ## 当前行高亮
+ * - 在当前光标所在行绘制半透明背景条
+ * - 在 [super.onDraw] **之前**绘制，确保文本和选区渲染在高亮之上
  *
- * **Scroll correctness:**
- * - [onScrollChanged] calls [invalidate] to ensure line numbers update on every scroll
- *   step, matching the visible text.
- * - [setTextSize] is overridden to keep the line-number paint in sync with the editor
- *   font size — eliminating the #1 alignment bug.
+ * ## 括号匹配
+ * - 当光标位于括号 `()[]{}` 旁边时，高亮显示匹配的括号
+ * - 通过临时 [BackgroundColorSpan] 实现，光标移动时自动清除
+ *
+ * ## 滚动正确性
+ * - [onScrollChanged] 调用 [invalidate] 确保每次滚动步进时行号同步更新
+ * - 重写 [setTextSize] 使行号 Paint 字体大小与编辑器同步
+ *
+ * @param context Android Context
+ * @param attrs XML 属性集（可选）
  */
 class LinedEditText(
     context: Context,
     attrs: AttributeSet? = null
 ) : AppCompatEditText(context, attrs) {
 
-    // ── externally configurable ──
+    // ── 外部可配置属性 ──
+
+    /** 是否显示行号栏（默认开启） */
     var showLineNumbers: Boolean = true
         set(value) {
             if (field != value) {
                 field = value
-                recomputePadding()
+                recomputePadding()  // 重新计算左侧内边距
                 invalidate()
             }
         }
 
+    /** 是否使用暗色模式配色（默认亮色） */
     var darkMode: Boolean = false
         set(value) {
             if (field != value) {
@@ -63,7 +67,7 @@ class LinedEditText(
             }
         }
 
-    /** Enable / disable current-line highlight (default true). */
+    /** 是否高亮当前行（默认开启） */
     var highlightCurrentLine: Boolean = true
         set(value) {
             if (field != value) {
@@ -72,7 +76,7 @@ class LinedEditText(
             }
         }
 
-    /** Enable / disable bracket-matching highlight (default true). */
+    /** 是否启用括号匹配高亮（默认开启） */
     var bracketMatching: Boolean = true
         set(value) {
             if (field != value) {
@@ -81,7 +85,7 @@ class LinedEditText(
             }
         }
 
-    /** Enable / disable visible whitespace (dots for spaces, arrows for tabs). */
+    /** 是否显示空白字符：空格显示为 ·，制表符显示为 →（默认关闭） */
     var showWhitespace: Boolean = false
         set(value) {
             if (field != value) {
@@ -90,94 +94,105 @@ class LinedEditText(
             }
         }
 
-    // ── gutter metrics (px) ──
-    private var gutterWidthPx: Float = 0f
-    private var gutterMarginPx: Float = 0f
-    private var contentMarginPx: Float = 0f
+    // ── 行号栏尺寸（像素）──
+    private var gutterWidthPx: Float = 0f     // 行号栏总宽度
+    private var gutterMarginPx: Float = 0f     // 行号右侧边距
+    private var contentMarginPx: Float = 0f    // 内容区左侧边距
 
-    // ── paints ──
-    private val gutterBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // ── Paint 对象（复用，避免频繁创建）──
+    private val gutterBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)       // 行号栏背景
     private val gutterDividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        strokeWidth = 1.5f
+        strokeWidth = 1.5f                                         // 分割线宽度
     }
     private val lineNumberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.RIGHT
+        textAlign = Paint.Align.RIGHT                              // 行号右对齐
     }
 
-    // Current-line highlight paint
+    // 当前行高亮 Paint
     private val currentLinePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    // Whitespace dot paint
+    // 空白字符 Paint
     private val whitespacePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
     }
 
-    /** Reusable char buffer for formatting line numbers — zero allocations during scroll. */
+    /** 可复用的字符缓冲区 — 滚动时零分配格式化行号 */
     private val numBuf = CharArray(10)
 
-    /** Track the previously-highlighted bracket pair so we can clear it. */
+    /** 记录上次高亮的括号对，用于清除 */
     private var lastBracketStart: Int = -1
     private var lastBracketEnd: Int = -1
 
     init {
+        // 根据屏幕密度计算行号栏尺寸
         val density = resources.displayMetrics.density
         gutterWidthPx = 56f * density
         gutterMarginPx = 6f * density
         contentMarginPx = 8f * density
 
-        // Match the paint to current textSize; setTextSize in init isn't called yet
-        // on a fresh view, so fall back to the inherited EditText default.
+        // 初始化 Paint 字体大小（与 EditText 默认值一致）
         lineNumberPaint.textSize = textSize
         whitespacePaint.textSize = textSize
 
         applyColors()
         recomputePadding()
 
+        // 基本配置
         isFocusable = true
         isFocusableInTouchMode = true
-        gravity = Gravity.TOP
+        gravity = Gravity.TOP                   // 内容顶部对齐
         isVerticalScrollBarEnabled = true
     }
 
-    // ── keep line-number paint in sync with editor text size ──
+    // ── 字体大小同步 ──
 
+    /**
+     * 重写 setTextSize，确保行号 Paint 字体大小与编辑器文本大小保持同步
+     * 这是消除行号与文本不对齐问题的关键修复
+     */
     override fun setTextSize(unit: Int, size: Float) {
         super.setTextSize(unit, size)
         lineNumberPaint.textSize = size
         whitespacePaint.textSize = size
     }
 
-    // ── colour application ──
+    // ── 颜色应用 ──
 
+    /** 根据 darkMode 设置所有 Paint 和 EditText 的颜色 */
     private fun applyColors() {
+        // 行号栏颜色
         val gc = gutterColors(darkMode)
         gutterBgPaint.color = gc.background
         gutterDividerPaint.color = gc.divider
         lineNumberPaint.color = gc.lineNumber
 
+        // 编辑器颜色
         val ec = editorColors(darkMode)
         setTextColor(ec.text)
         setBackgroundColor(ec.background)
         highlightColor = ec.highlight
 
-        // Current-line highlight: subtle tint of the accent colour
+        // 当前行高亮：强调色的 12% 透明度
         currentLinePaint.color = modifyAlpha(ec.accent, 0.12f)
 
-        // Whitespace: muted grey
+        // 空白字符：柔和的灰色
         whitespacePaint.color = if (darkMode) 0x66444444.toInt() else 0x66BBBBBB.toInt()
 
+        // Android 10+ 设置光标颜色
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try { textCursorDrawable?.setTint(ec.accent) } catch (_: Exception) {}
         }
     }
 
+    /** 修改颜色的 Alpha 通道 */
     private fun modifyAlpha(color: Int, factor: Float): Int {
         val alpha = ((color ushr 24) and 0xFF) * factor
         return (color and 0x00FFFFFF) or ((alpha.toInt() and 0xFF) shl 24)
     }
 
-    // ── padding ──
+    // ── 内边距计算 ──
 
+    /** 根据是否显示行号重新计算左侧内边距 */
     private fun recomputePadding() {
         val left = if (showLineNumbers) {
             (gutterWidthPx + contentMarginPx).toInt()
@@ -187,30 +202,31 @@ class LinedEditText(
         setPadding(left, paddingTop, paddingRight, paddingBottom)
     }
 
-    // ── system callbacks ──
+    // ── 系统回调 ──
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
         super.onConfigurationChanged(newConfig)
     }
 
-    /** Ensure line numbers + current-line highlight update when the user scrolls. */
+    /** 滚动时更新行号和当前行高亮 */
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
         if (showLineNumbers || highlightCurrentLine) {
-            invalidate()
+            invalidate()  // 触发重新绘制
         }
     }
 
-    /** Bracket matching: highlight partner when cursor lands next to a bracket. */
+    /** 光标位置变化时更新括号匹配高亮 */
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
         if (bracketMatching && selStart == selEnd) {
-            updateBracketHighlight(selStart)
+            updateBracketHighlight(selStart)  // 光标无选区时匹配括号
         } else {
-            clearBracketSpans()
+            clearBracketSpans()               // 有选区时清除高亮
         }
     }
 
+    /** 触摸时确保获得焦点并弹出键盘 */
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_DOWN) {
             requestFocus()
@@ -222,6 +238,7 @@ class LinedEditText(
         return super.onTouchEvent(event)
     }
 
+    /** 处理 Back 键：收起键盘 */
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
             clearFocus()
@@ -232,40 +249,56 @@ class LinedEditText(
         return super.onKeyPreIme(keyCode, event)
     }
 
-    // ── public helpers ──
+    // ── 公共工具方法 ──
 
+    /**
+     * 滚动到指定行
+     *
+     * @param line 1-based 行号
+     */
     fun scrollToLine(line: Int) {
         val l = layout ?: return
         val target = (line - 1).coerceIn(0, l.lineCount - 1)
         scrollTo(scrollX, l.getLineTop(target))
     }
 
-    /** Returns the 1-based line number at the given y-coordinate relative to the
-     *  EditText content area (i.e. y = touch event Y minus paddingTop). */
+    /**
+     * 根据 y 坐标获取行号（1-based）
+     *
+     * @param contentY 相对于 EditText 内容区域的 y 坐标（即触摸事件 Y 减去 paddingTop）
+     * @return 1-based 行号
+     */
     fun getLineAtY(contentY: Float): Int {
         val l = layout ?: return 1
         val line = l.getLineForVertical((contentY + scrollY).toInt())
         return (line + 1).coerceIn(1, l.lineCount)
     }
 
-    // ── bracket matching ──
+    // ── 括号匹配 ──
 
+    /** 括号配对映射表 */
     private val bracketPairs = mapOf(
         '(' to ')', ')' to '(',
         '[' to ']', ']' to '[',
         '{' to '}', '}' to '{'
     )
 
+    /**
+     * 更新括号高亮
+     *
+     * 检查光标前一个字符（标准约定）或光标所在字符是否为括号，
+     * 如果是则查找匹配括号并高亮两者。
+     */
     private fun updateBracketHighlight(cursor: Int) {
         clearBracketSpans()
         val text = text ?: return
         if (cursor <= 0 || cursor > text.length) return
 
-        // Check character immediately before cursor (standard convention)
+        // 优先检查光标前一个字符
         var idx = cursor - 1
         var ch = if (idx in text.indices) text[idx] else return
         if (ch !in bracketPairs) {
-            // Also check character at cursor
+            // 其次检查光标位置字符
             if (cursor < text.length) {
                 idx = cursor
                 ch = text[idx]
@@ -278,6 +311,7 @@ class LinedEditText(
         val match = findMatchingBracket(text, idx, ch, partner, isOpening)
         if (match >= 0) {
             val spannable = text as? Spannable ?: return
+            // 金色半透明高亮
             val hlColor = if (darkMode) 0x55FFD700.toInt() else 0x55FFA000.toInt()
             spannable.setSpan(
                 BackgroundColorSpan(hlColor),
@@ -294,11 +328,20 @@ class LinedEditText(
         }
     }
 
+    /**
+     * 查找匹配的括号
+     *
+     * 开括号：正向遍历，按深度匹配
+     * 闭括号：反向遍历，按深度匹配
+     *
+     * @return 匹配括号的索引，未找到返回 -1
+     */
     private fun findMatchingBracket(
         text: CharSequence, start: Int, ch: Char, partner: Char, isOpening: Boolean
     ): Int {
         var depth = 0
         if (isOpening) {
+            // 开括号：向→查找
             for (i in start until text.length) {
                 val c = text[i]
                 if (c == ch) depth++
@@ -308,6 +351,7 @@ class LinedEditText(
                 }
             }
         } else {
+            // 闭括号：向←查找
             for (i in start downTo 0) {
                 val c = text[i]
                 if (c == ch) depth++
@@ -320,13 +364,17 @@ class LinedEditText(
         return -1
     }
 
+    /**
+     * 清除所有括号高亮 Span
+     * 通过 SPAN_EXCLUSIVE_EXCLUSIVE flag 区分括号高亮和语法高亮 Span
+     */
     private fun clearBracketSpans() {
         if (lastBracketStart < 0) return
         val spannable = text as? Spannable ?: return
         val spans = spannable.getSpans(0, spannable.length, BackgroundColorSpan::class.java)
         for (span in spans) {
             val flags = spannable.getSpanFlags(span)
-            // Only clear spans that look like bracket highlights (not syntax spans)
+            // 仅清除具有 SPAN_EXCLUSIVE_EXCLUSIVE 标志的 Span（括号高亮专属）
             if (flags and Spannable.SPAN_EXCLUSIVE_EXCLUSIVE != 0) {
                 spannable.removeSpan(span)
             }
@@ -335,13 +383,22 @@ class LinedEditText(
         lastBracketEnd = -1
     }
 
-    // ── drawing ──
+    // ── 绘制 ──
 
+    /**
+     * 自定义绘制：按层叠顺序绘制
+     *
+     * 绘制顺序：
+     * 1. 当前行高亮（底层）
+     * 2. EditText 文本、光标、选区
+     * 3. 行号栏（顶层）
+     * 4. 空白字符可视化
+     */
     override fun onDraw(canvas: Canvas) {
         val l = layout
         val h = height
 
-        // 1. Current-line highlight (behind text)
+        // 1. 当前行高亮（在文本下方）
         if (highlightCurrentLine && h > 0 && l != null && l.lineCount > 0) {
             val top = paddingTop.toFloat()
             val visibleHeight = (h - paddingBottom).toFloat() - top
@@ -349,27 +406,33 @@ class LinedEditText(
                 val selLine = l.getLineForOffset(selectionStart.coerceIn(0, text?.length ?: 0))
                 val lineTop = l.getLineTop(selLine).toFloat() - scrollY.toFloat() + top
                 val lineBottom = l.getLineBottom(selLine).toFloat() - scrollY.toFloat() + top
-                // Only draw if the line is within the visible area
+                // 仅在可见区域绘制
                 if (lineBottom >= top && lineTop <= top + visibleHeight) {
                     canvas.drawRect(0f, lineTop, width.toFloat(), lineBottom, currentLinePaint)
                 }
             }
         }
 
-        // 2. Draw the EditText (text, cursor, selection)
+        // 2. 绘制 EditText 内容（文本、光标、选区）
         super.onDraw(canvas)
 
-        // 3. Overlay the gutter on top
+        // 3. 在文本上方叠加行号栏
         if (showLineNumbers && l != null && l.lineCount > 0) {
             drawGutter(canvas, l, h)
         }
 
-        // 4. Whitespace visualization (on top of text but under gutter)
+        // 4. 空白字符可视化
         if (showWhitespace && l != null && l.lineCount > 0) {
             drawWhitespace(canvas, l, h)
         }
     }
 
+    /**
+     * 绘制行号栏
+     *
+     * 仅绘制可见行 ± 3 行缓冲区，大文件也保持常量开销。
+     * 行数超过 5 位数时自动加宽行号栏。
+     */
     private fun drawGutter(canvas: Canvas, layout: Layout, viewHeight: Int) {
         if (viewHeight <= 0) return
 
@@ -378,7 +441,7 @@ class LinedEditText(
         val visibleHeight = bottom - top
         if (visibleHeight <= 0) return
 
-        // Dynamically widen gutter if line count exceeds current capacity
+        // 动态扩展行号栏宽度（当行数超过当前位数容量时）
         val maxLine = layout.lineCount
         val neededDigits = maxLine.toString().length
         val neededGutter = gutterMarginPx * 2 + lineNumberPaint.measureText("9".repeat(neededDigits))
@@ -386,14 +449,15 @@ class LinedEditText(
             gutterWidthPx = neededGutter + 8f
         }
 
-        // Clip to gutter region
+        // 裁剪到行号栏区域
         canvas.save()
         canvas.clipRect(0f, top, gutterWidthPx, bottom)
 
-        // Background + divider line
+        // 背景 + 分割线
         canvas.drawRect(0f, top, gutterWidthPx, bottom, gutterBgPaint)
         canvas.drawLine(gutterWidthPx, top, gutterWidthPx, bottom, gutterDividerPaint)
 
+        // 计算可见行范围 ± 3 行缓冲区
         val scrolly = scrollY
         val firstLine = maxOf(0, layout.getLineForVertical(scrolly) - 3)
         val lastLine = minOf(
@@ -403,6 +467,7 @@ class LinedEditText(
 
         val numX = gutterWidthPx - gutterMarginPx
 
+        // 逐行绘制行号
         for (line in firstLine..lastLine) {
             val screenBaseline = layout.getLineBaseline(line).toFloat() - scrolly + top
             drawLineNumber(canvas, line + 1, numX, screenBaseline)
@@ -411,9 +476,15 @@ class LinedEditText(
         canvas.restore()
     }
 
+    /**
+     * 绘制单个行号
+     *
+     * 使用可复用的 CharArray 进行零分配数字格式化。
+     */
     private fun drawLineNumber(canvas: Canvas, num: Int, x: Float, baseline: Float) {
         var n = num
         var pos = numBuf.size
+        // 整数转字符（从右到左填充缓冲区）
         if (n == 0) {
             numBuf[--pos] = '0'
         } else {
@@ -422,12 +493,14 @@ class LinedEditText(
                 n /= 10
             }
         }
+        // 从缓冲区绘制
         canvas.drawText(numBuf, pos, numBuf.size - pos, x, baseline, lineNumberPaint)
     }
 
     /**
-     * Draws visible whitespace characters: middle-dot (·) for spaces and
-     * right-arrow (→) for tabs. Only rendered on visible lines.
+     * 绘制空白字符可视化
+     *
+     * 空格显示为 ·，制表符显示为 →。仅在可见行上绘制。
      */
     private fun drawWhitespace(canvas: Canvas, layout: Layout, viewHeight: Int) {
         val text = text ?: return
@@ -446,8 +519,8 @@ class LinedEditText(
         )
 
         val paint = whitespacePaint
-        val spaceDot = "·"
-        val tabArrow = "→"
+        val spaceDot = "·"     // 空格显示为中点
+        val tabArrow = "→"     // 制表符显示为右箭头
 
         for (line in firstLine..lastLine) {
             val lineStart = layout.getLineStart(line)

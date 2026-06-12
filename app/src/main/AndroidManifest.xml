@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Textediting - Android 文本编辑器清单文件
+
+    应用架构：单 Activity (MainActivity) + Jetpack Compose UI
+    启动模式：singleTask（确保只有一个编辑器实例）
+    支持 Intent：MAIN/LAUNCHER + VIEW/EDIT（从外部应用打开文件）
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -9,19 +17,30 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ComposeEmptyActivity">
+
+        <!--
+            主 Activity
+            - exported=true：允许外部应用通过 Intent 打开
+            - launchMode=singleTask：确保只有一个实例，新 Intent 通过 onNewIntent() 处理
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.ComposeEmptyActivity">
+
+            <!-- 主启动 Intent -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- 外部文件打开 Intent：支持从文件管理器等应用打开文本文件 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.EDIT" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <!-- 支持的 MIME 类型 -->
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="text/*" />
                 <data android:mimeType="application/json" />

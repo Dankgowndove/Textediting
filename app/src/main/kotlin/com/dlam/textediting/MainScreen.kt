@@ -39,9 +39,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * 主界面 Composable
+ *
+ * 这是整个应用的顶层 UI 组件，组合了所有子组件：
+ * - 顶部工具栏（TopAppBar）：文件操作、撤销/重做、搜索、更多菜单
+ * - 标签栏（TabBar）：文件标签页管理
+ * - 搜索栏（SearchBar）：文本搜索
+ * - 编辑器区域：AndroidView 包装的 LinedEditText
+ * - 侧边栏：文件浏览器（FileTreeSidebar）
+ * - 对话框：跳转到行、文本统计、设置
+ *
+ * ## 编辑器单向数据流
+ * 用户输入通过 `ignoreTextChange` 标志与外部变更（打开文件/撤销/重做）
+ * 解耦，防止 Compose ↔ EditText 之间的反馈循环导致光标跳动。
+ *
+ * @param viewModel 主 ViewModel，持有所有应用状态
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
+    // ── 从 ViewModel 收集所有状态（StateFlow → Compose State）──
     val content by viewModel.textContent.collectAsState()
     val fileName by viewModel.fileName.collectAsState()
     val isModified by viewModel.isModified.collectAsState()
@@ -51,11 +69,12 @@ fun MainScreen(viewModel: MainViewModel) {
     val searchMatchCount by viewModel.searchMatchCount.collectAsState()
     val currentSearchIndex by viewModel.currentSearchIndex.collectAsState()
     val currentUri by viewModel.currentUri.collectAsState()
-    val lineCount by remember { derivedStateOf { content.lines().size } }
+    val lineCount by remember { derivedStateOf { content.lines().size } }  // 派生的行数
     val openTabs by viewModel.openTabs.collectAsState()
     val activeTabIndex by viewModel.activeTabIndex.collectAsState()
     val isCaseSensitive by viewModel.isCaseSensitive.collectAsState()
     val isWholeWord by viewModel.isWholeWord.collectAsState()
+    // ── 设置项 ──
     val fontSize by viewModel.settings.fontSize.collectAsState()
     val showLineNumbers by viewModel.settings.showLineNumbers.collectAsState()
     val wordWrap by viewModel.settings.wordWrap.collectAsState()
@@ -67,61 +86,70 @@ fun MainScreen(viewModel: MainViewModel) {
     val autoSaveInterval by viewModel.settings.autoSaveInterval.collectAsState()
     val recentFilesList by viewModel.recentFiles.recentFiles.collectAsState()
 
+    // ── Compose 本地状态 ──
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerState = rememberDrawerState(DrawerValue.Closed)  // 侧边栏状态
 
+    // 对话框显示状态
     var showStatsDialog by remember { mutableStateOf(false) }
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
 
-    val editTextRef = remember { mutableStateOf<LinedEditText?>(null) }
-    val isKeyboardVisible = remember { mutableStateOf(false) }
-    var ignoreTextChange by remember { mutableStateOf(false) }
+    // 编辑器引用和状态
+    val editTextRef = remember { mutableStateOf<LinedEditText?>(null) }  // EditText 弱引用
+    val isKeyboardVisible = remember { mutableStateOf(false) }            // 键盘可见状态
+    var ignoreTextChange by remember { mutableStateOf(false) }            // 阻断回写标志
 
-    // Detect system dark mode for editor theming
+    // 检测系统暗色模式（用于编辑器主题）
     val isDarkMode = androidx.compose.foundation.isSystemInDarkTheme()
 
+    // SAF 文件选择器启动器
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { viewModel.openFile(it) } }
 
+    // SAF 文件另存为启动器
     val saveAsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
     ) { uri -> uri?.let { viewModel.saveAs(it) } }
 
     val scope = rememberCoroutineScope()
 
-    // Collect snackbar events
+    // ════════════════════════════════════════════
+    //  LaunchedEffect 副作用处理
+    // ════════════════════════════════════════════
+
+    // 收集 Snackbar 事件（一次性消息提示）
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
     }
 
-    // Collect scroll-to-line events
+    // 收集跳转到行事件（从全局搜索等触发）
     LaunchedEffect(Unit) {
         viewModel.pendingScrollToLine.collect { line ->
-            kotlinx.coroutines.delay(150)
+            kotlinx.coroutines.delay(150)  // 等待编辑器准备就绪
             editTextRef.value?.scrollToLine(line)
         }
     }
 
-    // ── Auto-save timer ──
+    // ── 自动保存计时器 ──
     LaunchedEffect(isModified, autoSaveInterval, currentUri) {
         viewModel.scheduleAutoSave()
     }
 
-    // ── Syntax highlighting trigger ──
+    // ── 语法高亮触发 ──
     LaunchedEffect(content, fileName, syntaxHighlight) {
         if (syntaxHighlight && content.isNotEmpty() && fileName.isNotEmpty()) {
             viewModel.triggerSyntaxHighlight(content, fileName, isDarkMode)
         }
     }
 
-    // ── Apply syntax highlighting when results are ready ──
+    // ── 语法高亮结果应用 ──
     LaunchedEffect(Unit) {
         viewModel.highlightsReady.collect {
             editTextRef.value?.let { et ->
@@ -131,9 +159,12 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    // Handle external text changes (file open, undo/redo, tab switch).
+    // ── 外部文本变更同步到编辑器 ──
+    // 这是编辑器单向数据流的关键：仅当文本变更是由外部触发时
+    // （打开文件/撤销/重做/切换标签）才更新 EditText 内容
     LaunchedEffect(content) {
         if (ignoreTextChange) {
+            // 用户输入触发的变更：跳过回写，仅清除标志
             ignoreTextChange = false
             return@LaunchedEffect
         }
@@ -143,6 +174,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 val selStart = et.selectionStart
                 val selEnd = et.selectionEnd
                 et.setText(content)
+                // 尽可能恢复光标位置
                 if (selStart in 0..content.length && selEnd in selStart..content.length) {
                     et.setSelection(selStart, selEnd)
                 }
@@ -151,7 +183,11 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    // Back press: dismiss keyboard first, then search
+    // ════════════════════════════════════════════
+    //  返回键处理
+    // ════════════════════════════════════════════
+
+    // 优先隐藏键盘，其次关闭搜索
     if (isKeyboardVisible.value) {
         BackHandler {
             editTextRef.value?.let { et ->
@@ -165,12 +201,14 @@ fun MainScreen(viewModel: MainViewModel) {
         BackHandler(onBack = viewModel::dismissSearch)
     }
 
+    // ── 计算派生 UI 状态 ──
     val isFileOpen = openTabs.isNotEmpty() || currentUri != null || content.isNotEmpty() || fileName.isNotEmpty()
     val title = when {
         fileName.isEmpty() -> "文本编辑器"
-        else -> fileName + if (isModified) "  ●" else ""
+        else -> fileName + if (isModified) "  ●" else ""  // 修改标记
     }
 
+    /** 滚动到当前搜索匹配项 */
     fun scrollToSearchMatch() {
         val pos = viewModel.getSearchPosition() ?: return
         editTextRef.value?.let { et ->
@@ -178,9 +216,14 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    // ════════════════════════════════════════════
+    //  UI 结构
+    // ════════════════════════════════════════════
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
+            // 侧边栏：文件浏览器
             ModalDrawerSheet {
                 FileTreeSidebar(
                     viewModel = viewModel,
@@ -192,6 +235,7 @@ fun MainScreen(viewModel: MainViewModel) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
+                // ── 顶部工具栏 ──
                 TopAppBar(
                     title = {
                         Text(
@@ -201,6 +245,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         )
                     },
                     navigationIcon = {
+                        // 菜单按钮（打开侧边栏）
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Filled.Menu, contentDescription = "菜单")
                         }
@@ -210,9 +255,12 @@ fun MainScreen(viewModel: MainViewModel) {
                     ),
                     actions = {
                         if (isFileOpen) {
+                            // ── 文件已打开时的工具栏按钮 ──
+                            // 搜索切换
                             IconButton(onClick = { viewModel.toggleSearch() }) {
                                 Icon(Icons.Filled.Search, contentDescription = "搜索")
                             }
+                            // 撤销
                             IconButton(
                                 onClick = {
                                     val et = editTextRef.value ?: return@IconButton
@@ -229,6 +277,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             ) {
                                 Icon(Icons.Filled.Undo, contentDescription = "撤销")
                             }
+                            // 重做
                             IconButton(
                                 onClick = {
                                     val et = editTextRef.value ?: return@IconButton
@@ -245,6 +294,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             ) {
                                 Icon(Icons.Filled.Redo, contentDescription = "重做")
                             }
+                            // 保存
                             IconButton(
                                 onClick = {
                                     if (currentUri != null) {
@@ -257,7 +307,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             ) {
                                 Icon(Icons.Filled.Save, contentDescription = "保存")
                             }
-                            // Overflow menu
+                            // 更多操作（溢出菜单）
                             Box {
                                 IconButton(onClick = { showOverflowMenu = true }) {
                                     Icon(Icons.Filled.Settings, contentDescription = "更多操作")
@@ -266,6 +316,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     expanded = showOverflowMenu,
                                     onDismissRequest = { showOverflowMenu = false }
                                 ) {
+                                    // 复制行号
                                     DropdownMenuItem(
                                         text = { Text("复制行号") },
                                         onClick = {
@@ -278,6 +329,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         },
                                         leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
                                     )
+                                    // 跳转到行
                                     DropdownMenuItem(
                                         text = { Text("跳转到行") },
                                         onClick = {
@@ -286,6 +338,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         },
                                         leadingIcon = { Icon(Icons.Filled.Numbers, contentDescription = null) }
                                     )
+                                    // 文本统计
                                     DropdownMenuItem(
                                         text = { Text("文本统计") },
                                         onClick = {
@@ -294,6 +347,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         },
                                         leadingIcon = { Icon(Icons.Filled.BarChart, contentDescription = null) }
                                     )
+                                    // 设置
                                     DropdownMenuItem(
                                         text = { Text("设置") },
                                         onClick = {
@@ -305,6 +359,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 }
                             }
                         } else {
+                            // ── 无文件打开时的工具栏按钮 ──
                             Row {
                                 IconButton(onClick = { showSettingsDialog = true }) {
                                     Icon(Icons.Filled.Settings, contentDescription = "设置")
@@ -323,7 +378,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                // ── Tab bar ──
+                // ── 标签栏 ──
                 if (openTabs.isNotEmpty()) {
                     TabBar(
                         tabs = openTabs,
@@ -335,7 +390,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                 }
 
-                // ── Search bar ──
+                // ── 搜索栏（动画显示/隐藏）──
                 AnimatedVisibility(visible = isSearchVisible) {
                     SearchBar(
                         query = searchQuery,
@@ -358,8 +413,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                 }
 
-                // ── Content area ──
+                // ── 内容区域 ──
                 if (!isFileOpen && !isLoading) {
+                    // ── 空状态：欢迎页面 ──
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -371,6 +427,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(Modifier.height(24.dp))
+                            // 打开文件按钮
                             FilledTonalButton(
                                 onClick = { openFileLauncher.launch(arrayOf("*/*")) }
                             ) {
@@ -379,13 +436,14 @@ fun MainScreen(viewModel: MainViewModel) {
                                 Text("打开文件")
                             }
                             Spacer(Modifier.height(12.dp))
+                            // 新建文件按钮
                             FilledTonalButton(
                                 onClick = { viewModel.createNewFile() }
                             ) {
                                 Text("新建文件")
                             }
 
-                            // ── Recent files ──
+                            // ── 最近打开文件列表 ──
                             if (recentFilesList.isNotEmpty()) {
                                 Spacer(Modifier.height(32.dp))
                                 Text(
@@ -435,35 +493,42 @@ fun MainScreen(viewModel: MainViewModel) {
                         }
                     }
                 } else {
+                    // ── 编辑器区域 ──
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .focusable(true)
                     ) {
+                        // 加载指示器
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.align(Alignment.Center)
                             )
                         }
+                        // LinedEditText 通过 AndroidView 集成
                         AndroidView(
                             factory = { ctx ->
+                                // 创建编辑器实例并配置
                                 LinedEditText(ctx).also { et ->
+                                    // 多行文本 + 禁用拼写建议
                                     et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
                                             EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                                     et.setHorizontallyScrolling(!wordWrap)
                                     et.isVerticalScrollBarEnabled = true
                                     et.textSize = fontSize.toFloat()
-                                    et.typeface = android.graphics.Typeface.MONOSPACE
+                                    et.typeface = android.graphics.Typeface.MONOSPACE  // 等宽字体
                                     et.hint = "在此输入文本..."
                                     et.maxLines = Int.MAX_VALUE
                                     et.minLines = 1
+
+                                    // 应用当前设置
                                     et.showLineNumbers = showLineNumbers
                                     et.darkMode = isDarkMode
                                     et.highlightCurrentLine = highlightCurrentLine
                                     et.bracketMatching = bracketMatching
                                     et.showWhitespace = showWhitespace
 
-                                    // IME action
+                                    // IME 操作处理
                                     et.setOnEditorActionListener { _, actionId, event ->
                                         if (actionId == EditorInfo.IME_ACTION_DONE ||
                                             (event?.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP)
@@ -476,7 +541,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         } else false
                                     }
 
-                                    // Text change listener
+                                    // 文本变更监听器（编辑器单向数据流的入口）
                                     et.addTextChangedListener(object : TextWatcher {
                                         override fun beforeTextChanged(
                                             s: CharSequence, start: Int, count: Int, after: Int
@@ -487,16 +552,20 @@ fun MainScreen(viewModel: MainViewModel) {
                                         ) {}
 
                                         override fun afterTextChanged(s: Editable) {
+                                            // 先设置阻断标志，再通知 ViewModel
+                                            // 这样 LaunchedEffect(content) 会跳过回写
                                             ignoreTextChange = true
                                             viewModel.onTextChanged(s.toString())
                                         }
                                     })
 
-                                    editTextRef.value = et
+                                    editTextRef.value = et  // 保存引用
                                     et.requestFocus()
                                 }
                             },
                             update = { et ->
+                                // AndroidView.update 仅更新非文本属性
+                                // 绝不在此处比较或设置文本内容！
                                 if (et.textSize != fontSize.toFloat()) {
                                     et.textSize = fontSize.toFloat()
                                 }
@@ -515,7 +584,11 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    // ── Dialogs ──
+    // ════════════════════════════════════════════
+    //  对话框
+    // ════════════════════════════════════════════
+
+    // 跳转到行对话框
     if (showGoToLineDialog) {
         GoToLineDialog(
             totalLines = lineCount,
@@ -527,6 +600,7 @@ fun MainScreen(viewModel: MainViewModel) {
         )
     }
 
+    // 文本统计对话框
     if (showStatsDialog) {
         StatsDialog(
             text = content,
@@ -534,6 +608,7 @@ fun MainScreen(viewModel: MainViewModel) {
         )
     }
 
+    // 设置对话框
     if (showSettingsDialog) {
         SettingsDialog(
             settings = viewModel.settings,

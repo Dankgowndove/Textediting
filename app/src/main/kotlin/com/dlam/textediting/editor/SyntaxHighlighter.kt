@@ -5,43 +5,95 @@ import android.text.style.ForegroundColorSpan
 import java.util.regex.Pattern
 
 /**
- * Simple regex-based syntax highlighting for common programming languages.
+ * 基于正则表达式的语法高亮引擎
  *
- * All work is done on a background thread; results are returned as a list of
- * [SpanCommand]s that the caller applies on the main thread via [applyTo].
+ * 支持 13 种编程/标记语言的语法着色，通过文件扩展名自动检测语言。
  *
- * Language auto-detection is based on file extension (see [detectLanguage]).
+ * ## 架构设计
+ * - 所有分析工作在后台线程执行
+ * - 结果以 [SpanCommand] 列表返回，调用方在主线程通过 [applyTo] 应用
+ * - 语言检测基于文件扩展名（见 [detectLanguage]）
+ *
+ * ## 使用方式
+ * ```kotlin
+ * val rules = SyntaxHighlighter.detectLanguage("main.kt") ?: return
+ * val commands = withContext(Dispatchers.Default) { SyntaxHighlighter.analyse(text, rules) }
+ * SyntaxHighlighter.applyTo(spannable, commands, isDarkMode)
+ * ```
  */
 object SyntaxHighlighter {
 
-    // ── colour palette (ARGB ints) ──
+    // ── 配色方案（ARGB 整数）──
 
+    /** 亮色/暗色主题的语法高亮颜色定义 */
     object Colors {
-        // Light theme
-        val LIGHT_KEYWORD = 0xFF0033B3.toInt()
-        val LIGHT_STRING = 0xFF067D17.toInt()
-        val LIGHT_COMMENT = 0xFF8C8C8C.toInt()
-        val LIGHT_NUMBER = 0xFF1750EB.toInt()
-        val LIGHT_ANNOTATION = 0xFFB07C00.toInt()
+        // Light theme（亮色主题）
+        val LIGHT_KEYWORD = 0xFF0033B3.toInt()     // 关键字：深蓝
+        val LIGHT_STRING = 0xFF067D17.toInt()       // 字符串：深绿
+        val LIGHT_COMMENT = 0xFF8C8C8C.toInt()      // 注释：灰色
+        val LIGHT_NUMBER = 0xFF1750EB.toInt()       // 数字：蓝色
+        val LIGHT_ANNOTATION = 0xFFB07C00.toInt()   // 注解：金色
 
-        // Dark theme
-        val DARK_KEYWORD = 0xFFCC7832.toInt()
-        val DARK_STRING = 0xFF6AAB73.toInt()
-        val DARK_COMMENT = 0xFF808080.toInt()
-        val DARK_NUMBER = 0xFF6897BB.toInt()
-        val DARK_ANNOTATION = 0xFFBBB529.toInt()
+        // Dark theme（暗色主题）
+        val DARK_KEYWORD = 0xFFCC7832.toInt()       // 关键字：橙色（IntelliJ 风格）
+        val DARK_STRING = 0xFF6AAB73.toInt()        // 字符串：绿色
+        val DARK_COMMENT = 0xFF808080.toInt()       // 注释：灰色
+        val DARK_NUMBER = 0xFF6897BB.toInt()        // 数字：蓝色
+        val DARK_ANNOTATION = 0xFFBBB529.toInt()    // 注解：黄色
     }
 
+    /** Span 类型枚举 */
     enum class SpanType { KEYWORD, STRING, COMMENT, NUMBER, ANNOTATION }
 
+    /**
+     * 高亮指令：描述一段文本应该用什么颜色高亮
+     *
+     * @property start 起始位置（包含）
+     * @property end 结束位置（不包含）
+     * @property type 高亮类型
+     */
     data class SpanCommand(
         val start: Int,
         val end: Int,
         val type: SpanType
     )
 
-    /** Apply a list of [SpanCommand]s to a [Spannable]. */
+    /**
+     * 语言规则定义
+     *
+     * @property name 语言名称（用于调试）
+     * @property keywords 关键字集合
+     * @property lineComment 行注释前缀（如 //），null 表示不支持
+     * @property blockCommentStart 块注释开始标记（如 /*），null 表示不支持
+     * @property blockCommentEnd 块注释结束标记（如 */），null 表示不支持
+     * @property stringDelimiters 字符串定界符列表（如 "、'、"""）
+     * @property numberPattern 数字匹配正则，null 表示不匹配数字
+     * @property keywordPattern 关键字正则（自动生成，通常为 null）
+     */
+    data class LanguageRules(
+        val name: String,
+        val keywords: Set<String>,
+        val lineComment: String?,
+        val blockCommentStart: String?,
+        val blockCommentEnd: String?,
+        val stringDelimiters: List<String>,
+        val numberPattern: Pattern?,
+        val keywordPattern: Pattern? = null
+    )
+
+    // ═══════════════════════════════════════════
+    //  公开 API
+    // ═══════════════════════════════════════════
+
+    /**
+     * 将高亮指令列表应用到 [Spannable]
+     *
+     * @param spannable 目标 Spannable 文本
+     * @param commands 高亮指令列表
+     * @param darkMode 是否使用暗色主题颜色
+     */
     fun applyTo(spannable: Spannable, commands: List<SpanCommand>, darkMode: Boolean) {
+        // 根据主题选择颜色
         val keywordColor = if (darkMode) Colors.DARK_KEYWORD else Colors.LIGHT_KEYWORD
         val stringColor = if (darkMode) Colors.DARK_STRING else Colors.LIGHT_STRING
         val commentColor = if (darkMode) Colors.DARK_COMMENT else Colors.LIGHT_COMMENT
@@ -49,6 +101,7 @@ object SyntaxHighlighter {
         val annotationColor = if (darkMode) Colors.DARK_ANNOTATION else Colors.LIGHT_ANNOTATION
 
         for (cmd in commands) {
+            // 边界检查，确保 start/end 在有效范围内
             if (cmd.start < 0 || cmd.end > spannable.length || cmd.start >= cmd.end) continue
             val color = when (cmd.type) {
                 SpanType.KEYWORD -> keywordColor
@@ -65,7 +118,9 @@ object SyntaxHighlighter {
         }
     }
 
-    /** Clear all syntax-highlighting spans from a [Spannable]. */
+    /**
+     * 清除 [Spannable] 上所有由语法高亮添加的 ForegroundColorSpan
+     */
     fun clearSpans(spannable: Spannable) {
         val spans = spannable.getSpans(0, spannable.length, ForegroundColorSpan::class.java)
         for (span in spans) {
@@ -74,8 +129,10 @@ object SyntaxHighlighter {
     }
 
     /**
-     * Detect the programming language from a file extension.
-     * Returns a [LanguageRules] or null if the extension isn't supported.
+     * 根据文件名检测编程语言
+     *
+     * @param fileName 文件名（仅使用扩展名部分）
+     * @return 对应的 [LanguageRules]，如果不支持该语言则返回 null
      */
     fun detectLanguage(fileName: String): LanguageRules? {
         val ext = fileName.substringAfterLast('.', "").lowercase()
@@ -93,22 +150,13 @@ object SyntaxHighlighter {
             "php" -> phpRules
             "sql" -> sqlRules
             "md" -> markdownRules
-            else -> null // not a supported language
+            else -> null // 不支持的语言扩展名
         }
     }
 
-    // ── language definitions ──
-
-    data class LanguageRules(
-        val name: String,
-        val keywords: Set<String>,
-        val lineComment: String?,
-        val blockCommentStart: String?,
-        val blockCommentEnd: String?,
-        val stringDelimiters: List<String>,
-        val numberPattern: Pattern?,
-        val keywordPattern: Pattern? = null
-    )
+    // ═══════════════════════════════════════════
+    //  语言规则定义
+    // ═══════════════════════════════════════════
 
     // ── Kotlin ──
     private val kotlinRules = LanguageRules(
@@ -127,7 +175,7 @@ object SyntaxHighlighter {
         lineComment = "//",
         blockCommentStart = "/*",
         blockCommentEnd = "*/",
-        stringDelimiters = listOf("\"", "\"\"\""),
+        stringDelimiters = listOf("\"", "\"\"\""),  // 支持普通字符串和三引号字符串
         numberPattern = Pattern.compile("\\b\\d+(\\.\\d+)?[fFLl]?\\b")
     )
 
@@ -161,10 +209,10 @@ object SyntaxHighlighter {
             "True", "False", "None", "self", "print"
         ),
         lineComment = "#",
-        blockCommentStart = "\"\"\"",
+        blockCommentStart = "\"\"\"",    // Python 三引号也是块注释
         blockCommentEnd = "\"\"\"",
         stringDelimiters = listOf("\"", "'", "\"\"\"", "'''"),
-        numberPattern = Pattern.compile("\\b\\d+(\\.\\d+)?[jJ]?\\b")
+        numberPattern = Pattern.compile("\\b\\d+(\\.\\d+)?[jJ]?\\b")  // 支持复数 j
     )
 
     // ── JavaScript / TypeScript ──
@@ -181,11 +229,11 @@ object SyntaxHighlighter {
         lineComment = "//",
         blockCommentStart = "/*",
         blockCommentEnd = "*/",
-        stringDelimiters = listOf("\"", "'", "`"),
+        stringDelimiters = listOf("\"", "'", "`"),  // 支持模板字符串
         numberPattern = Pattern.compile("\\b\\d+(\\.\\d+)?[eE][+-]?\\d+\\b|\\b\\d+(\\.\\d+)?\\b")
     )
 
-    // ── C / C++ / Go / Rust (C-style) ──
+    // ── C / C++ / Go / Rust（统一 C 风格）──
     private val cStyleRules = LanguageRules(
         name = "C-Style",
         keywords = setOf(
@@ -208,18 +256,18 @@ object SyntaxHighlighter {
     private val xmlRules = LanguageRules(
         name = "XML",
         keywords = setOf("xml", "html", "head", "body", "div", "span", "p", "a", "img"),
-        lineComment = null,
+        lineComment = null,           // XML 无行注释
         blockCommentStart = "<!--",
         blockCommentEnd = "-->",
         stringDelimiters = listOf("\"", "'"),
-        numberPattern = null
+        numberPattern = null          // XML 无数字高亮需求
     )
 
     // ── JSON ──
     private val jsonRules = LanguageRules(
         name = "JSON",
         keywords = setOf("true", "false", "null"),
-        lineComment = null,
+        lineComment = null,           // JSON 标准不支持注释
         blockCommentStart = null,
         blockCommentEnd = null,
         stringDelimiters = listOf("\""),
@@ -229,7 +277,7 @@ object SyntaxHighlighter {
     // ── CSS ──
     private val cssRules = LanguageRules(
         name = "CSS",
-        keywords = setOf(),
+        keywords = setOf(),           // CSS 无关键字（选择器不是关键字）
         lineComment = null,
         blockCommentStart = "/*",
         blockCommentEnd = "*/",
@@ -246,7 +294,7 @@ object SyntaxHighlighter {
             "source", "local", "readonly", "shift", "unset"
         ),
         lineComment = "#",
-        blockCommentStart = null,
+        blockCommentStart = null,     // Shell 无块注释
         blockCommentEnd = null,
         stringDelimiters = listOf("\"", "'"),
         numberPattern = null
@@ -264,7 +312,7 @@ object SyntaxHighlighter {
             "new", "super"
         ),
         lineComment = "#",
-        blockCommentStart = "=begin",
+        blockCommentStart = "=begin",  // Ruby 独特的块注释语法
         blockCommentEnd = "=end",
         stringDelimiters = listOf("\"", "'"),
         numberPattern = Pattern.compile("\\b\\d+(\\.\\d+)?\\b")
@@ -294,6 +342,7 @@ object SyntaxHighlighter {
     private val sqlRules = LanguageRules(
         name = "SQL",
         keywords = setOf(
+            // 大写关键字
             "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE",
             "SET", "DELETE", "CREATE", "TABLE", "ALTER", "DROP", "INDEX",
             "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "AND", "OR",
@@ -303,7 +352,7 @@ object SyntaxHighlighter {
             "CASE", "WHEN", "THEN", "ELSE", "END", "PRIMARY", "KEY",
             "FOREIGN", "REFERENCES", "CASCADE", "DEFAULT", "UNIQUE",
             "CHECK", "CONSTRAINT",
-            // Also lowercase versions
+            // 小写关键字（同时支持大小写）
             "select", "from", "where", "insert", "into", "values", "update",
             "set", "delete", "create", "table", "alter", "drop", "index",
             "join", "left", "right", "inner", "outer", "on", "and", "or",
@@ -324,26 +373,34 @@ object SyntaxHighlighter {
     // ── Markdown ──
     private val markdownRules = LanguageRules(
         name = "Markdown",
-        keywords = setOf(),
+        keywords = setOf(),           // Markdown 无关键字高亮
         lineComment = null,
-        blockCommentStart = "<!--",
+        blockCommentStart = "<!--",   // HTML 注释
         blockCommentEnd = "-->",
         stringDelimiters = listOf(),
         numberPattern = null
     )
 
-    // ── highlighting engine ──
+    // ═══════════════════════════════════════════
+    //  高亮分析引擎
+    // ═══════════════════════════════════════════
 
     /**
-     * Analyse [text] and return a list of span commands.
-     * Designed to be called from a background coroutine.
+     * 分析文本并返回高亮指令列表
+     *
+     * 设计为在后台协程中调用。使用单次遍历 + 优先级匹配策略：
+     * 块注释 > 行注释 > 字符串 > 注解 > 数字 > 关键字
+     *
+     * @param text 待分析的文本
+     * @param rules 语言规则
+     * @return 高亮指令列表
      */
     fun analyse(text: CharSequence, rules: LanguageRules): List<SpanCommand> {
         val commands = mutableListOf<SpanCommand>()
         val len = text.length
         if (len == 0) return commands
 
-        // Build a regex for keywords: \b(key1|key2|...)\b
+        // 构建关键字正则：\b(key1|key2|...)\b
         val keywordRegex = if (rules.keywords.isNotEmpty()) {
             val escaped = rules.keywords.map { Pattern.quote(it) }
             Pattern.compile("\\b(${escaped.joinToString("|")})\\b")
@@ -351,34 +408,33 @@ object SyntaxHighlighter {
 
         var i = 0
         while (i < len) {
-            if (commands.size > 2000) break // safety limit
+            // 安全上限：防止无限循环或过大文本消耗过多内存
+            if (commands.size > 2000) break
 
-            // Block comments
+            // 1. 匹配块注释（最高优先级）
             if (rules.blockCommentStart != null && rules.blockCommentEnd != null) {
                 val bcs = rules.blockCommentStart
                 val bce = rules.blockCommentEnd
                 if (i + bcs.length <= len && text.subSequence(i, i + bcs.length).toString() == bcs) {
                     val end = text.indexOf(bce, i + bcs.length)
-                    val commentEnd = if (end >= 0) end + bce.length else len
+                    val commentEnd = if (end >= 0) end + bce.length else len  // 未闭合则到末尾
                     commands.add(SpanCommand(i, commentEnd, SpanType.COMMENT))
                     i = commentEnd
                     continue
                 }
-                // Python-style: block comment delimiter also used as string
-                if (bcs == "\"\"\"" && rules.name == "Python") {
-                    // Already handled above; skip falling through
-                }
             }
 
-            // Line comments
+            // 2. 匹配行注释
             if (rules.lineComment != null) {
                 val lc = rules.lineComment
+                // # 注释（Python, Ruby, Shell）
                 if (lc == "#" && i < len && text[i] == '#') {
                     val end = indexOfNewline(text, i)
                     commands.add(SpanCommand(i, end, SpanType.COMMENT))
                     i = end
                     continue
                 }
+                // // 注释（Kotlin, Java, JS, C 系列, PHP）
                 if (lc.length == 2 && i + 1 < len &&
                     text[i] == lc[0] && text[i + 1] == lc[1]
                 ) {
@@ -387,7 +443,7 @@ object SyntaxHighlighter {
                     i = end
                     continue
                 }
-                // SQL line comment
+                // -- SQL 行注释
                 if (lc == "--" && i + 1 < len && text[i] == '-' && text[i + 1] == '-') {
                     val end = indexOfNewline(text, i)
                     commands.add(SpanCommand(i, end, SpanType.COMMENT))
@@ -396,15 +452,15 @@ object SyntaxHighlighter {
                 }
             }
 
-            // Strings
+            // 3. 匹配字符串（处理转义字符 \）
             var matched = false
             for (delim in rules.stringDelimiters) {
                 val dlen = delim.length
                 if (i + dlen <= len && text.subSequence(i, i + dlen).toString() == delim) {
-                    // Find closing delimiter (simple approach: next unescaped delimiter)
+                    // 查找闭合定界符（简单方法：跳过转义字符，查找未转义的定界符）
                     var j = i + dlen
                     while (j < len) {
-                        if (text[j] == '\\') { j += 2; continue }
+                        if (text[j] == '\\') { j += 2; continue }  // 跳过转义字符
                         if (j + dlen <= len &&
                             text.subSequence(j, j + dlen).toString() == delim
                         ) {
@@ -422,7 +478,7 @@ object SyntaxHighlighter {
             }
             if (matched) continue
 
-            // Annotations / decorators
+            // 4. 匹配注解/装饰器（@xxx 模式）
             if (text[i] == '@' && i + 1 < len && text[i + 1].isLetter()) {
                 var j = i + 1
                 while (j < len && (text[j].isLetterOrDigit() || text[j] == '.' || text[j] == ':')) j++
@@ -431,7 +487,7 @@ object SyntaxHighlighter {
                 continue
             }
 
-            // Numbers
+            // 5. 匹配数字
             if (rules.numberPattern != null && text[i].isDigit()) {
                 val m = rules.numberPattern.matcher(text.subSequence(i, len))
                 if (m.find() && m.start() == 0) {
@@ -441,7 +497,7 @@ object SyntaxHighlighter {
                 }
             }
 
-            // Keywords
+            // 6. 匹配关键字（确保前面不是字母/数字，避免匹配到标识符中间部分）
             if (keywordRegex != null && (i == 0 || !text[i - 1].isLetterOrDigit())) {
                 val sub = text.subSequence(i, len)
                 val m = keywordRegex.matcher(sub)
@@ -452,12 +508,18 @@ object SyntaxHighlighter {
                 }
             }
 
+            // 无匹配，前进一个字符
             i++
         }
 
         return commands
     }
 
+    /**
+     * 查找从 start 位置开始的下一个换行符索引
+     *
+     * @return 换行符位置（不包含），如果没有找到则返回 text.length
+     */
     private fun indexOfNewline(text: CharSequence, start: Int): Int {
         for (i in start until text.length) {
             if (text[i] == '\n') return i

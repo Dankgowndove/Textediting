@@ -25,12 +25,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dlam.textediting.dialogs.GlobalReplaceDialog
 
+/**
+ * 文件树侧边栏主组件
+ *
+ * 包含：工具栏（选择目录/刷新/全局搜索）、文件树列表、全局搜索面板、
+ * 右键上下文菜单及相关的操作对话框。
+ *
+ * 侧边栏宽度固定为 280dp，通过 [ModalNavigationDrawer] 实现抽屉效果。
+ *
+ * @param viewModel 主 ViewModel
+ * @param onClose 关闭侧边栏回调
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileTreeSidebar(
     viewModel: MainViewModel,
     onClose: () -> Unit
 ) {
+    // ── 从 ViewModel 收集状态 ──
     val fileTreeState by viewModel.fileTree.collectAsState()
     val openTabs by viewModel.openTabs.collectAsState()
     val activeTabIndex by viewModel.activeTabIndex.collectAsState()
@@ -39,17 +51,21 @@ fun FileTreeSidebar(
     val isGlobalSearching by viewModel.isGlobalSearching.collectAsState()
     val recentFilesList by viewModel.recentFiles.recentFiles.collectAsState()
 
+    // ── 对话框和菜单状态 ──
     var showGlobalSearch by remember { mutableStateOf(false) }
     var showNewFileDialog by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showReplaceDialog by remember { mutableStateOf(false) }
+
+    // 上下文菜单：长按文件/目录时记录的目标信息
     var contextMenuUri by remember { mutableStateOf<Uri?>(null) }
     var contextMenuIsDir by remember { mutableStateOf(false) }
     var contextMenuName by remember { mutableStateOf("") }
     var isSelectingRoot by remember { mutableStateOf(false) }
 
+    // 目录选择器启动器（SAF OpenDocumentTree）
     val rootDirLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri -> uri?.let { viewModel.selectRootDir(it) } }
@@ -60,6 +76,7 @@ fun FileTreeSidebar(
             .width(280.dp)
             .background(MaterialTheme.colorScheme.surface)
     ) {
+        // ── 顶部工具栏 ──
         TopAppBar(
             title = {
                 Text(
@@ -75,16 +92,19 @@ fun FileTreeSidebar(
                 }
             },
             actions = {
+                // 全局搜索切换
                 IconButton(onClick = {
                     showGlobalSearch = !showGlobalSearch
                 }) {
                     Icon(Icons.Filled.Search, contentDescription = "全局搜索")
                 }
+                // 选择工作区目录
                 IconButton(onClick = {
                     rootDirLauncher.launch(null)
                 }) {
                     Icon(Icons.Filled.FolderOpen, contentDescription = "选择工作区")
                 }
+                // 刷新文件树（仅在有根目录时显示）
                 if (fileTreeState.rootUri != null) {
                     IconButton(onClick = { viewModel.refreshFileTree() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
@@ -96,6 +116,7 @@ fun FileTreeSidebar(
             )
         )
 
+        // ── 全局搜索面板（动画展开/收起）──
         AnimatedVisibility(visible = showGlobalSearch) {
             GlobalSearchPanel(
                 query = globalSearchQuery,
@@ -110,7 +131,9 @@ fun FileTreeSidebar(
             )
         }
 
+        // ── 内容区域（根据状态显示不同内容）──
         when {
+            // 加载中
             fileTreeState.isLoading -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -119,6 +142,7 @@ fun FileTreeSidebar(
                     CircularProgressIndicator()
                 }
             }
+            // 加载出错
             fileTreeState.error != null -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -130,10 +154,12 @@ fun FileTreeSidebar(
                     )
                 }
             }
+            // 未选择工作区
             fileTreeState.rootUri == null -> {
                 Column(
                     modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 ) {
+                    // 选择目录引导
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         contentAlignment = Alignment.Center
@@ -159,7 +185,7 @@ fun FileTreeSidebar(
                         }
                     }
 
-                    // Recent files
+                    // 最近打开文件列表
                     if (recentFilesList.isNotEmpty()) {
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                         Text(
@@ -203,6 +229,7 @@ fun FileTreeSidebar(
                     }
                 }
             }
+            // 目录为空
             fileTreeState.nodes.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -211,6 +238,7 @@ fun FileTreeSidebar(
                     Text("目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            // 显示文件树
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize()
@@ -221,13 +249,14 @@ fun FileTreeSidebar(
                             isActive = openTabs.getOrNull(activeTabIndex)?.uri?.toString() == node.uri.toString(),
                             onClick = {
                                 if (node.isDirectory) {
-                                    viewModel.toggleExpandDir(node.uri)
+                                    viewModel.toggleExpandDir(node.uri)  // 目录：展开/折叠
                                 } else {
-                                    viewModel.openFile(node.uri)
+                                    viewModel.openFile(node.uri)         // 文件：打开
                                     onClose()
                                 }
                             },
                             onLongClick = {
+                                // 长按显示上下文菜单
                                 contextMenuUri = node.uri
                                 contextMenuIsDir = node.isDirectory
                                 contextMenuName = node.name
@@ -239,6 +268,7 @@ fun FileTreeSidebar(
         }
     }
 
+    // ── 上下文菜单对话框 ──
     if (contextMenuUri != null) {
         ContextMenuDialog(
             isDirectory = contextMenuIsDir,
@@ -269,6 +299,7 @@ fun FileTreeSidebar(
         )
     }
 
+    // ── 新建文件对话框 ──
     if (showNewFileDialog && contextMenuUri != null) {
         CreateItemDialog(
             title = "新建文件",
@@ -282,6 +313,7 @@ fun FileTreeSidebar(
         )
     }
 
+    // ── 新建文件夹对话框 ──
     if (showNewFolderDialog && contextMenuUri != null) {
         CreateItemDialog(
             title = "新建文件夹",
@@ -295,6 +327,7 @@ fun FileTreeSidebar(
         )
     }
 
+    // ── 重命名对话框 ──
     if (showRenameDialog && contextMenuUri != null) {
         RenameDialog(
             currentName = contextMenuName,
@@ -308,6 +341,7 @@ fun FileTreeSidebar(
         )
     }
 
+    // ── 删除确认对话框 ──
     if (showDeleteConfirm && contextMenuUri != null) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false; contextMenuUri = null },
@@ -326,6 +360,7 @@ fun FileTreeSidebar(
         )
     }
 
+    // ── 全局替换对话框 ──
     if (showReplaceDialog) {
         GlobalReplaceDialog(
             onDismiss = { showReplaceDialog = false },
@@ -337,6 +372,17 @@ fun FileTreeSidebar(
     }
 }
 
+/**
+ * 文件树中单个条目的 Composable
+ *
+ * 根据节点深度缩进（每层 20dp），目录显示文件夹图标，文件显示文档图标。
+ * 当前打开的文件使用 primaryContainer 背景色高亮。
+ *
+ * @param node 文件节点
+ * @param isActive 是否为当前打开的文件
+ * @param onClick 点击回调
+ * @param onLongClick 长按回调
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileTreeItem(
@@ -346,14 +392,14 @@ private fun FileTreeItem(
     onLongClick: () -> Unit
 ) {
     val bgColor = when {
-        isActive -> MaterialTheme.colorScheme.primaryContainer
+        isActive -> MaterialTheme.colorScheme.primaryContainer  // 活跃文件高亮
         else -> MaterialTheme.colorScheme.surface
     }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = (16 + node.depth * 20).dp)
+            .padding(start = (16 + node.depth * 20).dp)  // 根据深度缩进
             .clip(RoundedCornerShape(4.dp))
             .background(bgColor)
             .combinedClickable(
@@ -363,16 +409,18 @@ private fun FileTreeItem(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 目录/文件图标
         Icon(
             imageVector = if (node.isDirectory) Icons.Filled.Folder else Icons.Filled.Description,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = if (node.isDirectory)
-                MaterialTheme.colorScheme.tertiary
+                MaterialTheme.colorScheme.tertiary      // 目录使用第三色
             else
                 MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.width(8.dp))
+        // 文件名
         Text(
             text = node.name,
             style = MaterialTheme.typography.bodyMedium,
@@ -384,6 +432,20 @@ private fun FileTreeItem(
     }
 }
 
+/**
+ * 文件/目录上下文菜单对话框
+ *
+ * 目录类型显示更多操作（新建文件/文件夹、粘贴），文件类型操作较少。
+ *
+ * @param isDirectory 是否为目录
+ * @param onDismiss 关闭回调
+ * @param onNewFile 新建文件回调
+ * @param onNewFolder 新建文件夹回调
+ * @param onDelete 删除回调
+ * @param onRename 重命名回调
+ * @param onCopy 复制回调
+ * @param onPaste 粘贴回调
+ */
 @Composable
 private fun ContextMenuDialog(
     isDirectory: Boolean,
@@ -400,6 +462,7 @@ private fun ContextMenuDialog(
         title = { Text("操作") },
         text = {
             Column {
+                // 目录专属操作
                 if (isDirectory) {
                     TextButton(
                         onClick = onNewFile,
@@ -418,6 +481,7 @@ private fun ContextMenuDialog(
                         Text("新建文件夹")
                     }
                 }
+                // 通用操作
                 TextButton(
                     onClick = onRename,
                     modifier = Modifier.fillMaxWidth()
@@ -434,6 +498,7 @@ private fun ContextMenuDialog(
                     Spacer(Modifier.width(8.dp))
                     Text("复制")
                 }
+                // 粘贴仅对目录有效
                 if (isDirectory) {
                     TextButton(
                         onClick = onPaste,
@@ -445,6 +510,7 @@ private fun ContextMenuDialog(
                     }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                // 删除操作（红色警告）
                 TextButton(
                     onClick = onDelete,
                     modifier = Modifier.fillMaxWidth()
@@ -465,6 +531,14 @@ private fun ContextMenuDialog(
     )
 }
 
+/**
+ * 新建文件/文件夹对话框
+ *
+ * @param title 对话框标题
+ * @param hint 输入框提示文字
+ * @param onDismiss 取消回调
+ * @param onConfirm 确认回调（传入输入的名称）
+ */
 @Composable
 private fun CreateItemDialog(
     title: String,
@@ -487,7 +561,7 @@ private fun CreateItemDialog(
         confirmButton = {
             TextButton(
                 onClick = { if (input.isNotBlank()) onConfirm(input.trim()) },
-                enabled = input.isNotBlank()
+                enabled = input.isNotBlank()  // 空输入禁用
             ) { Text("创建") }
         },
         dismissButton = {
@@ -496,6 +570,15 @@ private fun CreateItemDialog(
     )
 }
 
+/**
+ * 重命名对话框
+ *
+ * 预填当前文件名，允许用户修改。
+ *
+ * @param currentName 当前文件名
+ * @param onDismiss 取消回调
+ * @param onConfirm 确认回调（传入新名称）
+ */
 @Composable
 private fun RenameDialog(
     currentName: String,
@@ -526,6 +609,19 @@ private fun RenameDialog(
     )
 }
 
+/**
+ * 全局搜索面板
+ *
+ * 在文件树侧边栏内嵌入的搜索组件，支持在指定目录中搜索文件内容。
+ * 显示搜索结果列表，每项显示文件名、行号和匹配行内容。
+ *
+ * @param query 搜索查询
+ * @param results 搜索结果列表
+ * @param isSearching 是否正在搜索
+ * @param onQueryChange 查询文本变化回调
+ * @param onResultClick 结果项点击回调
+ * @param onReplaceClick 替换按钮点击回调
+ */
 @Composable
 private fun GlobalSearchPanel(
     query: String,
@@ -541,6 +637,7 @@ private fun GlobalSearchPanel(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(8.dp)
     ) {
+        // 搜索输入框
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
@@ -552,6 +649,7 @@ private fun GlobalSearchPanel(
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface
             )
         )
+        // 搜索结果统计与替换按钮
         if (query.isNotEmpty()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -570,6 +668,7 @@ private fun GlobalSearchPanel(
                 }
             }
         }
+        // 搜索结果列表（最多 300dp 高度）
         if (results.isNotEmpty()) {
             LazyColumn(
                 modifier = Modifier
@@ -586,11 +685,13 @@ private fun GlobalSearchPanel(
                         color = MaterialTheme.colorScheme.surface
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
+                            // 文件名（主题色）
                             Text(
                                 text = result.fileName,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                            // 行号 + 匹配行内容
                             Row {
                                 Text(
                                     text = "${result.lineNumber}: ",
@@ -611,4 +712,3 @@ private fun GlobalSearchPanel(
         }
     }
 }
-
