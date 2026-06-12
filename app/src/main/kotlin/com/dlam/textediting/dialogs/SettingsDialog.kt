@@ -37,11 +37,20 @@ fun SettingsDialog(
     val bracketMatching by settings.bracketMatching.collectAsState()
     val highlightCurrentLine by settings.highlightCurrentLine.collectAsState()
     val showWhitespace by settings.showWhitespace.collectAsState()
+    val darkThemeMode by settings.darkThemeMode.collectAsState()
 
     // ── 下拉菜单展开状态 ──
     var showFontSizeMenu by remember { mutableStateOf(false) }
     var showMaxTabsMenu by remember { mutableStateOf(false) }
     var showAutoSaveMenu by remember { mutableStateOf(false) }
+    var showThemeMenu by remember { mutableStateOf(false) }
+
+    // 主题模式标签
+    val themeModeLabels = mapOf(
+        0 to "跟随系统",
+        1 to "浅色主题",
+        2 to "深色主题"
+    )
 
     // 自动保存间隔 → 显示标签映射
     val autoSaveLabels = mapOf(
@@ -59,77 +68,80 @@ fun SettingsDialog(
             Column(
                 // 设置过多时允许垂直滚动
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // ── 字体大小（下拉菜单）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                // ── 字体大小（M3 ExposedDropdownMenuBox）──
+                ExposedDropdownMenuBox(
+                    expanded = showFontSizeMenu,
+                    onExpandedChange = { showFontSizeMenu = it }
                 ) {
-                    Text("字体大小", style = MaterialTheme.typography.bodyMedium)
-                    Box {
-                        TextButton(onClick = { showFontSizeMenu = true }) {
-                            Text("${fontSize}sp", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        DropdownMenu(
-                            expanded = showFontSizeMenu,
-                            onDismissRequest = { showFontSizeMenu = false }
-                        ) {
-                            settings.getAllFontSizes().forEach { size ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            "${size}sp",
-                                            // 当前值加粗显示
-                                            fontWeight = if (size == fontSize) {
-                                                androidx.compose.ui.text.font.FontWeight.Bold
-                                            } else androidx.compose.ui.text.font.FontWeight.Normal
-                                        )
-                                    },
-                                    onClick = {
-                                        settings.setFontSize(size)
-                                        showFontSizeMenu = false
-                                    }
-                                )
-                            }
+                    OutlinedTextField(
+                        value = "${fontSize}sp",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("字体大小") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showFontSizeMenu) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        singleLine = true,
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = showFontSizeMenu,
+                        onDismissRequest = { showFontSizeMenu = false }
+                    ) {
+                        settings.getAllFontSizes().forEach { size ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "${size}sp",
+                                        fontWeight = if (size == fontSize)
+                                            androidx.compose.ui.text.font.FontWeight.Bold
+                                        else androidx.compose.ui.text.font.FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    settings.setFontSize(size)
+                                    showFontSizeMenu = false
+                                }
+                            )
                         }
                     }
                 }
 
-                HorizontalDivider()
-
-                // ── 最大标签数（下拉菜单）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                // ── 最大标签数（M3 ExposedDropdownMenuBox）──
+                ExposedDropdownMenuBox(
+                    expanded = showMaxTabsMenu,
+                    onExpandedChange = { showMaxTabsMenu = it }
                 ) {
-                    Text("最大标签数", style = MaterialTheme.typography.bodyMedium)
-                    Box {
-                        TextButton(onClick = { showMaxTabsMenu = true }) {
-                            Text("$maxTabs", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        DropdownMenu(
-                            expanded = showMaxTabsMenu,
-                            onDismissRequest = { showMaxTabsMenu = false }
-                        ) {
-                            settings.getAllMaxTabs().forEach { count ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            "$count",
-                                            fontWeight = if (count == maxTabs) {
-                                                androidx.compose.ui.text.font.FontWeight.Bold
-                                            } else androidx.compose.ui.text.font.FontWeight.Normal
-                                        )
-                                    },
-                                    onClick = {
-                                        settings.setMaxTabs(count)
-                                        showMaxTabsMenu = false
-                                    }
-                                )
-                            }
+                    OutlinedTextField(
+                        value = "$maxTabs",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("最大标签数") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showMaxTabsMenu) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        singleLine = true,
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = showMaxTabsMenu,
+                        onDismissRequest = { showMaxTabsMenu = false }
+                    ) {
+                        settings.getAllMaxTabs().forEach { count ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "$count",
+                                        fontWeight = if (count == maxTabs)
+                                            androidx.compose.ui.text.font.FontWeight.Bold
+                                        else androidx.compose.ui.text.font.FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    settings.setMaxTabs(count)
+                                    showMaxTabsMenu = false
+                                }
+                            )
                         }
                     }
                 }
@@ -162,6 +174,46 @@ fun SettingsDialog(
                         checked = wordWrap,
                         onCheckedChange = { settings.setWordWrap(it) }
                     )
+                }
+
+                HorizontalDivider()
+
+                // ── 主题模式（M3 ExposedDropdownMenuBox）──
+                ExposedDropdownMenuBox(
+                    expanded = showThemeMenu,
+                    onExpandedChange = { showThemeMenu = it }
+                ) {
+                    OutlinedTextField(
+                        value = themeModeLabels[darkThemeMode] ?: "跟随系统",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("主题模式") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showThemeMenu) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        singleLine = true,
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = showThemeMenu,
+                        onDismissRequest = { showThemeMenu = false }
+                    ) {
+                        themeModeLabels.forEach { (mode, label) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        label,
+                                        fontWeight = if (mode == darkThemeMode)
+                                            androidx.compose.ui.text.font.FontWeight.Bold
+                                        else androidx.compose.ui.text.font.FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    settings.setDarkThemeMode(mode)
+                                    showThemeMenu = false
+                                }
+                            )
+                        }
+                    }
                 }
 
                 HorizontalDivider()
@@ -226,40 +278,40 @@ fun SettingsDialog(
 
                 HorizontalDivider()
 
-                // ── 自动保存（下拉菜单）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                // ── 自动保存（M3 ExposedDropdownMenuBox）──
+                ExposedDropdownMenuBox(
+                    expanded = showAutoSaveMenu,
+                    onExpandedChange = { showAutoSaveMenu = it }
                 ) {
-                    Text("自动保存", style = MaterialTheme.typography.bodyMedium)
-                    Box {
-                        TextButton(onClick = { showAutoSaveMenu = true }) {
-                            Text(
-                                autoSaveLabels[autoSaveInterval] ?: "关闭",
-                                style = MaterialTheme.typography.bodyMedium
+                    OutlinedTextField(
+                        value = autoSaveLabels[autoSaveInterval] ?: "关闭",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("自动保存") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showAutoSaveMenu) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        singleLine = true,
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = showAutoSaveMenu,
+                        onDismissRequest = { showAutoSaveMenu = false }
+                    ) {
+                        settings.getAllAutoSaveIntervals().forEach { interval ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        autoSaveLabels[interval] ?: "$interval 秒",
+                                        fontWeight = if (interval == autoSaveInterval)
+                                            androidx.compose.ui.text.font.FontWeight.Bold
+                                        else androidx.compose.ui.text.font.FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    settings.setAutoSaveInterval(interval)
+                                    showAutoSaveMenu = false
+                                }
                             )
-                        }
-                        DropdownMenu(
-                            expanded = showAutoSaveMenu,
-                            onDismissRequest = { showAutoSaveMenu = false }
-                        ) {
-                            settings.getAllAutoSaveIntervals().forEach { interval ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            autoSaveLabels[interval] ?: "$interval 秒",
-                                            fontWeight = if (interval == autoSaveInterval) {
-                                                androidx.compose.ui.text.font.FontWeight.Bold
-                                            } else androidx.compose.ui.text.font.FontWeight.Normal
-                                        )
-                                    },
-                                    onClick = {
-                                        settings.setAutoSaveInterval(interval)
-                                        showAutoSaveMenu = false
-                                    }
-                                )
-                            }
                         }
                     }
                 }

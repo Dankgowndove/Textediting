@@ -13,7 +13,12 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
@@ -103,8 +108,13 @@ fun MainScreen(viewModel: MainViewModel) {
     val isKeyboardVisible = remember { mutableStateOf(false) }            // 键盘可见状态
     var ignoreTextChange by remember { mutableStateOf(false) }            // 阻断回写标志
 
-    // 检测系统暗色模式（用于编辑器主题）
-    val isDarkMode = androidx.compose.foundation.isSystemInDarkTheme()
+    // [M3 优化] 根据用户设置或系统决定暗色模式
+    val darkThemeMode by viewModel.settings.darkThemeMode.collectAsState()
+    val isDarkMode = when (darkThemeMode) {
+        1 -> false  // 始终浅色
+        2 -> true   // 始终深色
+        else -> androidx.compose.foundation.isSystemInDarkTheme()  // 0=跟随系统
+    }
 
     // SAF 文件选择器启动器
     val openFileLauncher = rememberLauncherForActivityResult(
@@ -244,6 +254,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             overflow = TextOverflow.Ellipsis
                         )
                     },
+                    tonalElevation = 3.dp,
                     navigationIcon = {
                         // 菜单按钮（打开侧边栏）
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -260,14 +271,16 @@ fun MainScreen(viewModel: MainViewModel) {
                             IconButton(onClick = { viewModel.toggleSearch() }) {
                                 Icon(Icons.Filled.Search, contentDescription = "搜索")
                             }
-                            // 撤销
+                            // [Bug #5 修复] 撤销：操作完成后同步 ViewModel 状态
                             IconButton(
                                 onClick = {
                                     val et = editTextRef.value ?: return@IconButton
                                     val result = viewModel.undoManager.prepareUndo()
                                     if (result != null) {
                                         try {
+                                            ignoreTextChange = true   // 阻止 TextWatcher 再次 record
                                             et.setText(result)
+                                            viewModel.onUndoRedoApplied(result)
                                         } finally {
                                             viewModel.undoManager.finishUndoRedo()
                                         }
@@ -277,14 +290,16 @@ fun MainScreen(viewModel: MainViewModel) {
                             ) {
                                 Icon(Icons.Filled.Undo, contentDescription = "撤销")
                             }
-                            // 重做
+                            // [Bug #5 修复] 重做：操作完成后同步 ViewModel 状态
                             IconButton(
                                 onClick = {
                                     val et = editTextRef.value ?: return@IconButton
                                     val result = viewModel.undoManager.prepareRedo()
                                     if (result != null) {
                                         try {
+                                            ignoreTextChange = true
                                             et.setText(result)
+                                            viewModel.onUndoRedoApplied(result)
                                         } finally {
                                             viewModel.undoManager.finishUndoRedo()
                                         }
@@ -310,7 +325,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             // 更多操作（溢出菜单）
                             Box {
                                 IconButton(onClick = { showOverflowMenu = true }) {
-                                    Icon(Icons.Filled.Settings, contentDescription = "更多操作")
+                                    Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
                                 }
                                 DropdownMenu(
                                     expanded = showOverflowMenu,
@@ -365,7 +380,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     Icon(Icons.Filled.Settings, contentDescription = "设置")
                                 }
                                 IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
-                                    Icon(Icons.Filled.Add, contentDescription = "打开文件")
+                                    Icon(Icons.Default.FolderOpen, contentDescription = "打开文件")
                                 }
                             }
                         }
@@ -378,8 +393,12 @@ fun MainScreen(viewModel: MainViewModel) {
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                // ── 标签栏 ──
-                if (openTabs.isNotEmpty()) {
+                // ── 标签栏（带动画）──
+                AnimatedVisibility(
+                    visible = openTabs.isNotEmpty(),
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
                     TabBar(
                         tabs = openTabs,
                         activeIndex = activeTabIndex,
@@ -413,25 +432,32 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                 }
 
-                // ── 内容区域 ──
-                if (!isFileOpen && !isLoading) {
-                    // ── 空状态：欢迎页面 ──
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
+                // ── 内容区域（带动画切换）──
+                AnimatedContent(
+                    targetState = isFileOpen && !isLoading,
+                    transitionSpec = {
+                        fadeIn(animationSpec = androidx.compose.animation.core.tween(300)) togetherWith
+                            fadeOut(animationSpec = androidx.compose.animation.core.tween(300))
+                    }
+                ) { showEditor ->
+                    if (!showEditor) {
+                        // ── 空状态：欢迎页面 ──
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 "文本编辑器",
                                 style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(Modifier.height(24.dp))
                             // 打开文件按钮
                             FilledTonalButton(
                                 onClick = { openFileLauncher.launch(arrayOf("*/*")) }
                             ) {
-                                Icon(Icons.Filled.Add, contentDescription = null)
+                                Icon(Icons.Default.FolderOpen, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
                                 Text("打开文件")
                             }
@@ -492,8 +518,15 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         }
                     }
+                        } // end Box
                 } else {
                     // ── 编辑器区域 ──
+                    // [M3 优化] 使用 Surface 包裹以获得深度层次感
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        tonalElevation = 1.dp
+                    ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -505,6 +538,9 @@ fun MainScreen(viewModel: MainViewModel) {
                                 modifier = Modifier.align(Alignment.Center)
                             )
                         }
+                        // [M3 优化] 捕获 Material3 配色方案供编辑器使用
+                        val editorColorScheme = MaterialTheme.colorScheme
+
                         // LinedEditText 通过 AndroidView 集成
                         AndroidView(
                             factory = { ctx ->
@@ -515,11 +551,15 @@ fun MainScreen(viewModel: MainViewModel) {
                                             EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                                     et.setHorizontallyScrolling(!wordWrap)
                                     et.isVerticalScrollBarEnabled = true
-                                    et.textSize = fontSize.toFloat()
+                                    // [Bug #6 修复] 使用 SP 单位设置字体大小，而非直接传 float（会被误当 px）
+                                    et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
                                     et.typeface = android.graphics.Typeface.MONOSPACE  // 等宽字体
                                     et.hint = "在此输入文本..."
                                     et.maxLines = Int.MAX_VALUE
                                     et.minLines = 1
+
+                                    // [M3 优化] 编辑器颜色融入 Material 主题
+                                    et.colorScheme = editorColorScheme
 
                                     // 应用当前设置
                                     et.showLineNumbers = showLineNumbers
@@ -566,9 +606,17 @@ fun MainScreen(viewModel: MainViewModel) {
                             update = { et ->
                                 // AndroidView.update 仅更新非文本属性
                                 // 绝不在此处比较或设置文本内容！
-                                if (et.textSize != fontSize.toFloat()) {
-                                    et.textSize = fontSize.toFloat()
+                                // [Bug #6 修复] 统一用 SP 单位比较和设置字体大小
+                                val targetPx = android.util.TypedValue.applyDimension(
+                                    android.util.TypedValue.COMPLEX_UNIT_SP,
+                                    fontSize.toFloat(),
+                                    et.resources.displayMetrics
+                                )
+                                if (Math.abs(et.textSize - targetPx) > 0.5f) {
+                                    et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
                                 }
+                                // [M3 优化] 主题变化时同步更新编辑器配色
+                                et.colorScheme = editorColorScheme
                                 et.setHorizontallyScrolling(!wordWrap)
                                 et.showLineNumbers = showLineNumbers
                                 et.darkMode = isDarkMode
@@ -579,6 +627,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             modifier = Modifier.fillMaxSize()
                         )
                     }
+                    } // end Surface
                 }
             }
         }

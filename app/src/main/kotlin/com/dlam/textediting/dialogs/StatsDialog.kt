@@ -59,7 +59,7 @@ fun StatsDialog(
             } else {
                 // 结果展示：逐项显示统计信息
                 result?.let { r ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         // ── 基础统计 ──
                         StatsRow("总字符数（含空格）", r.totalCharsWithSpace)
                         StatsRow("总字符数（不含空格）", r.totalCharsNoSpace)
@@ -109,8 +109,16 @@ private fun StatsRow(label: String, value: String) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }

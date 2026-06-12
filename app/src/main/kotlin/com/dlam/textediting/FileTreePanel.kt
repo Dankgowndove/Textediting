@@ -190,7 +190,7 @@ fun FileTreeSidebar(
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                         Text(
                             "最近打开",
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)
                         )
@@ -391,44 +391,47 @@ private fun FileTreeItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
-    val bgColor = when {
-        isActive -> MaterialTheme.colorScheme.primaryContainer  // 活跃文件高亮
-        else -> MaterialTheme.colorScheme.surface
-    }
-
-    Row(
+    // [M3 优化] 使用 Surface 替代 Row+background，获得正确的点击涟漪和 elevation
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = (16 + node.depth * 20).dp)  // 根据深度缩进
             .clip(RoundedCornerShape(4.dp))
-            .background(bgColor)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            ),
+        color = when {
+            isActive -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surface
+        },
+        tonalElevation = if (isActive) 2.dp else 0.dp
     ) {
-        // 目录/文件图标
-        Icon(
-            imageVector = if (node.isDirectory) Icons.Filled.Folder else Icons.Filled.Description,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = if (node.isDirectory)
-                MaterialTheme.colorScheme.tertiary      // 目录使用第三色
-            else
-                MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(8.dp))
-        // 文件名
-        Text(
-            text = node.name,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSurface
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 目录/文件图标
+            Icon(
+                imageVector = if (node.isDirectory) Icons.Filled.Folder else Icons.Filled.Description,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (node.isDirectory)
+                    MaterialTheme.colorScheme.tertiary
+                else
+                    MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(8.dp))
+            // 文件名
+            Text(
+                text = node.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }
 
@@ -446,6 +449,11 @@ private fun FileTreeItem(
  * @param onCopy 复制回调
  * @param onPaste 粘贴回调
  */
+/**
+ * [M3 修复] 长按上下文菜单 — 使用 Card + Box 实现 DropdownMenu 风格菜单，
+ * 替代原 AlertDialog 反模式（AlertDialog 应用于确认提示，非操作菜单）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ContextMenuDialog(
     isDirectory: Boolean,
@@ -457,78 +465,73 @@ private fun ContextMenuDialog(
     onCopy: () -> Unit,
     onPaste: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("操作") },
-        text = {
-            Column {
+    // 全屏透明遮罩，点击外部关闭
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 4.dp,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            )
+        ) {
+            Column(modifier = Modifier.widthIn(min = 200.dp)) {
                 // 目录专属操作
                 if (isDirectory) {
-                    TextButton(
-                        onClick = onNewFile,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Filled.NoteAdd, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("新建文件")
-                    }
-                    TextButton(
-                        onClick = onNewFolder,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Filled.CreateNewFolder, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("新建文件夹")
-                    }
+                    DropdownMenuItem(
+                        text = { Text("新建文件") },
+                        onClick = { onNewFile(); onDismiss() },
+                        leadingIcon = { Icon(Icons.Filled.NoteAdd, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("新建文件夹") },
+                        onClick = { onNewFolder(); onDismiss() },
+                        leadingIcon = { Icon(Icons.Filled.CreateNewFolder, contentDescription = null) }
+                    )
                 }
                 // 通用操作
-                TextButton(
-                    onClick = onRename,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Filled.Edit, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("重命名")
-                }
-                TextButton(
-                    onClick = onCopy,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("复制")
-                }
+                DropdownMenuItem(
+                    text = { Text("重命名") },
+                    onClick = { onRename(); onDismiss() },
+                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
+                )
+                DropdownMenuItem(
+                    text = { Text("复制") },
+                    onClick = { onCopy(); onDismiss() },
+                    leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
+                )
                 // 粘贴仅对目录有效
                 if (isDirectory) {
-                    TextButton(
-                        onClick = onPaste,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Filled.ContentPaste, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("粘贴")
-                    }
+                    DropdownMenuItem(
+                        text = { Text("粘贴") },
+                        onClick = { onPaste(); onDismiss() },
+                        leadingIcon = { Icon(Icons.Filled.ContentPaste, contentDescription = null) }
+                    )
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 // 删除操作（红色警告）
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
+                DropdownMenuItem(
+                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                    onClick = { onDelete(); onDismiss() },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
         }
-    )
+    }
 }
 
 /**
@@ -685,10 +688,10 @@ private fun GlobalSearchPanel(
                         color = MaterialTheme.colorScheme.surface
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
-                            // 文件名（主题色）
+                            // 文件名（主题色，略大字体）
                             Text(
                                 text = result.fileName,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
                             // 行号 + 匹配行内容
@@ -702,7 +705,8 @@ private fun GlobalSearchPanel(
                                     text = result.lineContent,
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }

@@ -408,8 +408,9 @@ object SyntaxHighlighter {
 
         var i = 0
         while (i < len) {
-            // 安全上限：防止无限循环或过大文本消耗过多内存
-            if (commands.size > 2000) break
+            // [Bug #7 修复] 安全上限提高到 10000，避免大文件（>500行）后半段丢失高亮。
+            // 原 2000 上限太保守：一个 500 行的 Kotlin 文件轻松超过 2000 个 token。
+            if (commands.size > 10000) break
 
             // 1. 匹配块注释（最高优先级）
             if (rules.blockCommentStart != null && rules.blockCommentEnd != null) {

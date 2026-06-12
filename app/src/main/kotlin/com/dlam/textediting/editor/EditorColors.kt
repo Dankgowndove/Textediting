@@ -1,23 +1,21 @@
 package com.dlam.textediting.editor
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 
 /**
  * 编辑器组件独立配色方案
  *
- * 编辑器（LinedEditText）和行号栏使用自己独立的配色，
- * 不依赖 Material 3 主题色，以确保代码编辑区域的最佳对比度和可读性。
+ * 编辑器（LinedEditText）和行号栏使用自己独立的配色系统，
+ * 但当 [colorScheme] 参数非空时，优先从 Material 3 主题派生颜色，
+ * 确保代码编辑区域与应用程序其他部分的视觉一致性。
  *
- * 配色分为亮色和暗色两套方案，由 [LinedEditText.darkMode] 属性控制切换。
+ * 向后兼容：当 [colorScheme] 为 null 时使用内置硬编码颜色。
  */
 
 /**
  * 行号栏配色
- *
- * @property background 行号栏背景色
- * @property divider 行号栏右侧分割线颜色
- * @property lineNumber 行号文字颜色
  */
 internal data class GutterColors(
     val background: Int,
@@ -27,11 +25,6 @@ internal data class GutterColors(
 
 /**
  * 编辑器配色
- *
- * @property text 文本颜色
- * @property background 编辑器背景色
- * @property accent 强调色（光标、括号高亮等）
- * @property highlight 选区高亮色
  */
 internal data class EditorColors(
     val text: Int,
@@ -44,44 +37,63 @@ internal data class EditorColors(
  * 获取行号栏配色
  *
  * @param isDark 是否暗色模式
- * @return 对应的 GutterColors
+ * @param colorScheme Material 3 配色方案，null 时使用内置颜色
  */
-internal fun gutterColors(isDark: Boolean): GutterColors = if (isDark) {
-    // 暗色主题：深色背景 + 浅灰分割线 + 浅灰行号
-    GutterColors(
-        background = 0xFF1A1A1A.toInt(),
-        divider = 0xFF3A3A3A.toInt(),
-        lineNumber = 0xFFAAAAAA.toInt()
-    )
-} else {
-    // 亮色主题：浅灰背景 + 灰分割线 + 深灰行号
-    GutterColors(
-        background = 0xFFF0F0F0.toInt(),
-        divider = 0xFFD0D0D0.toInt(),
-        lineNumber = 0xFF888888.toInt()
-    )
+internal fun gutterColors(isDark: Boolean, colorScheme: ColorScheme? = null): GutterColors {
+    if (colorScheme != null) {
+        // 从 Material 3 主题派生行号栏颜色
+        return GutterColors(
+            background = colorScheme.surfaceVariant.toArgb(),
+            divider = colorScheme.outlineVariant.toArgb(),
+            lineNumber = colorScheme.onSurfaceVariant.copy(alpha = 0.6f).toArgb()
+        )
+    }
+    // 回退：内置硬编码颜色
+    return if (isDark) {
+        GutterColors(
+            background = 0xFF1A1A1A.toInt(),
+            divider = 0xFF3A3A3A.toInt(),
+            lineNumber = 0xFFAAAAAA.toInt()
+        )
+    } else {
+        GutterColors(
+            background = 0xFFF0F0F0.toInt(),
+            divider = 0xFFD0D0D0.toInt(),
+            lineNumber = 0xFF888888.toInt()
+        )
+    }
 }
 
 /**
  * 获取编辑器配色
  *
  * @param isDark 是否暗色模式
- * @return 对应的 EditorColors
+ * @param colorScheme Material 3 配色方案，null 时使用内置颜色
  */
-internal fun editorColors(isDark: Boolean): EditorColors = if (isDark) {
-    // 暗色主题：亮文本 + 深底 + 紫色强调
-    EditorColors(
-        text = 0xFFEEEEEE.toInt(),
-        background = 0xFF121212.toInt(),
-        accent = 0xFFBB86FC.toInt(),
-        highlight = 0x44FFFFFF.toInt()
-    )
-} else {
-    // 亮色主题：深文本 + 白底 + 紫色强调
-    EditorColors(
-        text = 0xFF1A1A1A.toInt(),
-        background = 0xFFFFFFFF.toInt(),
-        accent = 0xFF6650A4.toInt(),
-        highlight = 0x33000000.toInt()
-    )
+internal fun editorColors(isDark: Boolean, colorScheme: ColorScheme? = null): EditorColors {
+    if (colorScheme != null) {
+        // 从 Material 3 主题派生编辑器颜色
+        return EditorColors(
+            text = colorScheme.onSurface.toArgb(),
+            background = colorScheme.surface.toArgb(),
+            accent = colorScheme.primary.toArgb(),
+            highlight = colorScheme.primary.copy(alpha = 0.2f).toArgb()
+        )
+    }
+    // 回退：内置硬编码颜色
+    return if (isDark) {
+        EditorColors(
+            text = 0xFFEEEEEE.toInt(),
+            background = 0xFF121212.toInt(),
+            accent = 0xFFBB86FC.toInt(),
+            highlight = 0x44FFFFFF.toInt()
+        )
+    } else {
+        EditorColors(
+            text = 0xFF1A1A1A.toInt(),
+            background = 0xFFFFFFFF.toInt(),
+            accent = 0xFF6650A4.toInt(),
+            highlight = 0x33000000.toInt()
+        )
+    }
 }

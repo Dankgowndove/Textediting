@@ -92,6 +92,15 @@ class SettingsManager(context: Context) {
         prefs.edit().putBoolean(KEY_HIGHLIGHT_CURRENT_LINE, enabled).apply()
     }
 
+    // ── 主题模式（0=跟随系统, 1=浅色, 2=深色）──
+    private val _darkThemeMode = MutableStateFlow(prefs.getInt(KEY_DARK_THEME_MODE, DEFAULT_DARK_THEME_MODE))
+    val darkThemeMode: StateFlow<Int> = _darkThemeMode.asStateFlow()
+
+    fun setDarkThemeMode(mode: Int) {
+        _darkThemeMode.value = mode
+        prefs.edit().putInt(KEY_DARK_THEME_MODE, mode).apply()
+    }
+
     // ── 显示空白字符 ──
     private val _showWhitespace = MutableStateFlow(prefs.getBoolean(KEY_SHOW_WHITESPACE, false))
     val showWhitespace: StateFlow<Boolean> = _showWhitespace.asStateFlow()
@@ -119,9 +128,12 @@ class SettingsManager(context: Context) {
         private const val KEY_BRACKET_MATCHING = "bracket_matching"
         private const val KEY_HIGHLIGHT_CURRENT_LINE = "highlight_current_line"
         private const val KEY_SHOW_WHITESPACE = "show_whitespace"
+        private const val KEY_DARK_THEME_MODE = "dark_theme_mode"
 
         /** 默认字体大小（sp） */
         const val DEFAULT_FONT_SIZE = 14
+        /** 默认主题模式：跟随系统 */
+        const val DEFAULT_DARK_THEME_MODE = 0
         /** 默认最大标签页数 */
         const val DEFAULT_MAX_TABS = 10
 

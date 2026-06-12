@@ -47,6 +47,9 @@ class LinedEditText(
 
     // ── 外部可配置属性 ──
 
+    // [Bug #3 修复] 括号 Span 专属标记接口，用于精确区分括号高亮和语法高亮 Span
+    private interface BracketSpan
+
     /** 是否显示行号栏（默认开启） */
     var showLineNumbers: Boolean = true
         set(value) {
@@ -59,6 +62,16 @@ class LinedEditText(
 
     /** 是否使用暗色模式配色（默认亮色） */
     var darkMode: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                applyColors()
+                invalidate()
+            }
+        }
+
+    /** [M3 优化] Material 3 配色方案引用：非 null 时编辑器从主题派生颜色 */
+    var colorScheme: androidx.compose.material3.ColorScheme? = null
         set(value) {
             if (field != value) {
                 field = value
@@ -148,26 +161,33 @@ class LinedEditText(
 
     /**
      * 重写 setTextSize，确保行号 Paint 字体大小与编辑器文本大小保持同步
-     * 这是消除行号与文本不对齐问题的关键修复
+     *
+     * [Bug #1 修复] super.setTextSize(unit, size) 内部会把 sp 转成 px 存入 Paint，
+     * 此后 textSize 属性返回 px 值。直接读取 textSize（已是 px）赋给行号 Paint，
+     * 避免将 sp 数值（如 14f）直接当 px 使用导致行号字体极小/极大。
      */
     override fun setTextSize(unit: Int, size: Float) {
         super.setTextSize(unit, size)
-        lineNumberPaint.textSize = size
-        whitespacePaint.textSize = size
+        // textSize 在 super 调用后已经是 px，直接赋值即可
+        val pxSize = textSize
+        lineNumberPaint.textSize = pxSize
+        whitespacePaint.textSize = pxSize
+        // 字体变化时行号栏宽度也需要重新计算
+        recomputePadding()
     }
 
     // ── 颜色应用 ──
 
-    /** 根据 darkMode 设置所有 Paint 和 EditText 的颜色 */
+    /** 根据 darkMode 和可选的 colorScheme 设置所有 Paint 和 EditText 的颜色 */
     private fun applyColors() {
-        // 行号栏颜色
-        val gc = gutterColors(darkMode)
+        // 行号栏颜色 — 优先从 Material 3 主题派生
+        val gc = gutterColors(darkMode, colorScheme)
         gutterBgPaint.color = gc.background
         gutterDividerPaint.color = gc.divider
         lineNumberPaint.color = gc.lineNumber
 
-        // 编辑器颜色
-        val ec = editorColors(darkMode)
+        // 编辑器颜色 — 优先从 Material 3 主题派生
+        val ec = editorColors(darkMode, colorScheme)
         setTextColor(ec.text)
         setBackgroundColor(ec.background)
         highlightColor = ec.highlight
@@ -313,13 +333,14 @@ class LinedEditText(
             val spannable = text as? Spannable ?: return
             // 金色半透明高亮
             val hlColor = if (darkMode) 0x55FFD700.toInt() else 0x55FFA000.toInt()
+            // [Bug #3 修复] 使用匿名 BracketSpan 子类，便于精确清除
             spannable.setSpan(
-                BackgroundColorSpan(hlColor),
+                object : BackgroundColorSpan(hlColor), BracketSpan {},
                 idx, idx + 1,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
             spannable.setSpan(
-                BackgroundColorSpan(hlColor),
+                object : BackgroundColorSpan(hlColor), BracketSpan {},
                 match, match + 1,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
@@ -366,16 +387,15 @@ class LinedEditText(
 
     /**
      * 清除所有括号高亮 Span
-     * 通过 SPAN_EXCLUSIVE_EXCLUSIVE flag 区分括号高亮和语法高亮 Span
+     * [Bug #3 修复] 改为精确按接口类型清除，只查找 BracketSpan 类型，
+     * 完全不干扰 ForegroundColorSpan 等语法高亮 Span。
      */
     private fun clearBracketSpans() {
         if (lastBracketStart < 0) return
         val spannable = text as? Spannable ?: return
         val spans = spannable.getSpans(0, spannable.length, BackgroundColorSpan::class.java)
         for (span in spans) {
-            val flags = spannable.getSpanFlags(span)
-            // 仅清除具有 SPAN_EXCLUSIVE_EXCLUSIVE 标志的 Span（括号高亮专属）
-            if (flags and Spannable.SPAN_EXCLUSIVE_EXCLUSIVE != 0) {
+            if (span is BracketSpan) {
                 spannable.removeSpan(span)
             }
         }
@@ -400,8 +420,9 @@ class LinedEditText(
 
         // 1. 当前行高亮（在文本下方）
         if (highlightCurrentLine && h > 0 && l != null && l.lineCount > 0) {
-            val top = paddingTop.toFloat()
-            val visibleHeight = (h - paddingBottom).toFloat() - top
+            // [Bug #4 修复] 使用 extendedPaddingTop 保证与实际文本对齐
+            val top = extendedPaddingTop.toFloat()
+            val visibleHeight = (h - extendedPaddingBottom).toFloat() - top
             if (visibleHeight > 0) {
                 val selLine = l.getLineForOffset(selectionStart.coerceIn(0, text?.length ?: 0))
                 val lineTop = l.getLineTop(selLine).toFloat() - scrollY.toFloat() + top
@@ -430,23 +451,29 @@ class LinedEditText(
     /**
      * 绘制行号栏
      *
+     * [Bug #2 修复] 移除了 `neededDigits > 5` 的错误限制条件，改为只要
+     * 像素宽度不足就立即扩宽，并同步调用 recomputePadding + requestLayout。
+     * [Bug #4 修复] baseline 计算改用 extendedPaddingTop。
      * 仅绘制可见行 ± 3 行缓冲区，大文件也保持常量开销。
-     * 行数超过 5 位数时自动加宽行号栏。
      */
     private fun drawGutter(canvas: Canvas, layout: Layout, viewHeight: Int) {
         if (viewHeight <= 0) return
 
-        val top = paddingTop.toFloat()
-        val bottom = (viewHeight - paddingBottom).toFloat()
+        val top = extendedPaddingTop.toFloat()
+        val bottom = (viewHeight - extendedPaddingBottom).toFloat()
         val visibleHeight = bottom - top
         if (visibleHeight <= 0) return
 
-        // 动态扩展行号栏宽度（当行数超过当前位数容量时）
+        // [Bug #2 修复] 只要像素宽度不足就扩宽，不再有位数限制
         val maxLine = layout.lineCount
-        val neededDigits = maxLine.toString().length
-        val neededGutter = gutterMarginPx * 2 + lineNumberPaint.measureText("9".repeat(neededDigits))
-        if (neededGutter > gutterWidthPx && neededDigits > 5) {
+        val neededGutter = gutterMarginPx * 2 +
+                lineNumberPaint.measureText("0".repeat(maxLine.toString().length))
+        if (neededGutter > gutterWidthPx) {
             gutterWidthPx = neededGutter + 8f
+            recomputePadding()
+            requestLayout()
+            // requestLayout 会触发新一轮 onDraw，本次直接返回避免用旧尺寸绘制
+            return
         }
 
         // 裁剪到行号栏区域
@@ -469,6 +496,7 @@ class LinedEditText(
 
         // 逐行绘制行号
         for (line in firstLine..lastLine) {
+            // [Bug #4 修复] 用 extendedPaddingTop 而非 paddingTop
             val screenBaseline = layout.getLineBaseline(line).toFloat() - scrolly + top
             drawLineNumber(canvas, line + 1, numX, screenBaseline)
         }
@@ -501,13 +529,14 @@ class LinedEditText(
      * 绘制空白字符可视化
      *
      * 空格显示为 ·，制表符显示为 →。仅在可见行上绘制。
+     * [Bug #4 修复] 使用 extendedPaddingTop 保证与实际文本对齐。
      */
     private fun drawWhitespace(canvas: Canvas, layout: Layout, viewHeight: Int) {
         val text = text ?: return
         if (text.isEmpty()) return
 
-        val top = paddingTop.toFloat()
-        val bottom = (viewHeight - paddingBottom).toFloat()
+        val top = extendedPaddingTop.toFloat()
+        val bottom = (viewHeight - extendedPaddingBottom).toFloat()
         val visibleHeight = bottom - top
         if (visibleHeight <= 0) return
 

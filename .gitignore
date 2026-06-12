@@ -15,3 +15,4 @@ app/keystore/
 *.jks
 *.keystore
 日志/
+.claude/

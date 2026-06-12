@@ -74,8 +74,8 @@ fun SearchBar(
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                     focusedIndicatorColor = MaterialTheme.colorScheme.primary,
                     unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
                 )
@@ -168,8 +168,8 @@ fun TabBar(
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             itemsIndexed(tabs, key = { idx, _ -> idx }) { index, tab ->
                 // 单个标签页
@@ -273,7 +273,7 @@ fun GlobalReplaceDialog(
                 TextButton(onClick = {
                     showConfirm = false
                     onReplace(find, replace, onlyCurrent)
-                }) { Text("确认执行", color = MaterialTheme.colorScheme.error) }
+                }) { Text("确认执行") }
             },
             dismissButton = {
                 TextButton(onClick = { showConfirm = false }) { Text("取消") }

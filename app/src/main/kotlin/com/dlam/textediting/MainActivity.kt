@@ -17,7 +17,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import com.dlam.textediting.ui.theme.ComposeEmptyActivityTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.dlam.textediting.ui.theme.TextEditingTheme
 
 /**
  * 应用主 Activity
@@ -36,7 +38,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // 设置 Compose 内容，应用 Material 3 主题
         setContent {
-            ComposeEmptyActivityTheme {
+            val darkThemeMode by viewModel.settings.darkThemeMode.collectAsState()
+            val isDark = when (darkThemeMode) {
+                1 -> false
+                2 -> true
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            TextEditingTheme(darkTheme = isDark) {
                 MainScreen(viewModel = viewModel)
             }
         }

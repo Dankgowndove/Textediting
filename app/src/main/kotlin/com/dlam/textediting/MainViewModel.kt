@@ -265,6 +265,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         undoManager.record(newText)
     }
 
+    // ════════════════════════════════════════════
+    //  [Bug #5 修复] 撤销/重做完成后同步 ViewModel 状态
+    // ════════════════════════════════════════════
+
+    /**
+     * 撤销/重做操作将文本写入 EditText 后，调用此方法同步 ViewModel 状态。
+     *
+     * 原问题：撤销/重做只调用了 et.setText()，但 _textContent 和 _isModified
+     * 没有同步更新，导致：
+     *   1. 工具栏保存按钮状态（enabled）不更新
+     *   2. 标签页圆点修改指示器不更新
+     *   3. 语法高亮不触发
+     *   4. 自动保存判断错误
+     *
+     * 调用时机：在 prepareUndo/prepareRedo + et.setText() 之后、finishUndoRedo() 之前调用。
+     */
+    fun onUndoRedoApplied(text: String) {
+        _textContent.value = text
+        _isModified.value = text != savedText
+        // 同步更新当前活跃标签页状态
+        val tabs = _openTabs.value.toMutableList()
+        val idx = _activeTabIndex.value
+        if (idx in tabs.indices) {
+            tabs[idx] = tabs[idx].copy(
+                content = text,
+                isModified = text != savedText
+            )
+            _openTabs.value = tabs
+        }
+    }
+
     /** 保存当前文件到原始 URI */
     fun saveFile() {
         viewModelScope.launch {
@@ -500,38 +531,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return Pair(positions[idx], query.length)
     }
 
-    /** 跳转到下一个搜索匹配（循环） */
+    // [Bug #8 修复] searchNext/searchPrevious 直接使用缓存的 _searchPositions，
+    // 不再重复调用 findAllPositions 全文搜索。只有 onSearchQueryChanged 触发的
+    // performSearch 会重新搜索。对于大文件（>1MB）每次按键都整篇搜索会卡顿。
     fun searchNext() {
-        val query = _searchQuery.value
-        if (query.isEmpty()) return
-        val text = _textContent.value
-        val positions = findAllPositions(text, query)
-        if (positions.isEmpty()) {
-            _searchPositions.value = emptyList()
-            _searchMatchCount.value = 0
-            _currentSearchIndex.value = -1
-            return
-        }
-        _searchPositions.value = positions
-        _searchMatchCount.value = positions.size
+        val positions = _searchPositions.value
+        if (positions.isEmpty()) return
         val current = _currentSearchIndex.value
         _currentSearchIndex.value = if (current < 0) 0 else (current + 1) % positions.size
     }
 
     /** 跳转到上一个搜索匹配（循环） */
     fun searchPrevious() {
-        val query = _searchQuery.value
-        if (query.isEmpty()) return
-        val text = _textContent.value
-        val positions = findAllPositions(text, query)
-        if (positions.isEmpty()) {
-            _searchPositions.value = emptyList()
-            _searchMatchCount.value = 0
-            _currentSearchIndex.value = -1
-            return
-        }
-        _searchPositions.value = positions
-        _searchMatchCount.value = positions.size
+        val positions = _searchPositions.value
+        if (positions.isEmpty()) return
         val current = _currentSearchIndex.value
         _currentSearchIndex.value = if (current <= 0) positions.size - 1 else current - 1
     }
