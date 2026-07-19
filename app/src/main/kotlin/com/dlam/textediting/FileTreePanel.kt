@@ -63,7 +63,11 @@ fun FileTreeSidebar(
     var contextMenuUri by remember { mutableStateOf<Uri?>(null) }
     var contextMenuIsDir by remember { mutableStateOf(false) }
     var contextMenuName by remember { mutableStateOf("") }
-    var isSelectingRoot by remember { mutableStateOf(false) }
+    // 待删除的 URI（独立于 contextMenuUri，避免 onClick 中 onDismiss 提前清空）
+    var pendingDeleteUri by remember { mutableStateOf<Uri?>(null) }
+    // 待操作的 URI（用于新建文件/文件夹、重命名等需要 URI 的操作）
+    var pendingActionUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingActionName by remember { mutableStateOf("") }
 
     // 目录选择器启动器（SAF OpenDocumentTree）
     val rootDirLauncher = rememberLauncherForActivityResult(
@@ -275,18 +279,20 @@ fun FileTreeSidebar(
             onDismiss = { contextMenuUri = null },
             onNewFile = {
                 showNewFileDialog = true
-                contextMenuUri = null
+                pendingActionUri = contextMenuUri
             },
             onNewFolder = {
                 showNewFolderDialog = true
-                contextMenuUri = null
+                pendingActionUri = contextMenuUri
             },
             onDelete = {
+                pendingDeleteUri = contextMenuUri
                 showDeleteConfirm = true
             },
             onRename = {
                 showRenameDialog = true
-                contextMenuUri = null
+                pendingActionUri = contextMenuUri
+                pendingActionName = contextMenuName
             },
             onCopy = {
                 contextMenuUri?.let { viewModel.copyFileToClipboard(it) }
@@ -300,62 +306,66 @@ fun FileTreeSidebar(
     }
 
     // ── 新建文件对话框 ──
-    if (showNewFileDialog && contextMenuUri != null) {
+    if (showNewFileDialog && pendingActionUri != null) {
         CreateItemDialog(
             title = "新建文件",
             hint = "文件名（默认 .txt）",
-            onDismiss = { showNewFileDialog = false; contextMenuUri = null },
+            onDismiss = { showNewFileDialog = false; pendingActionUri = null },
             onConfirm = { name ->
-                contextMenuUri?.let { viewModel.createFile(it, name) }
+                pendingActionUri?.let { viewModel.createFile(it, name) }
                 showNewFileDialog = false
-                contextMenuUri = null
+                pendingActionUri = null
             }
         )
     }
 
     // ── 新建文件夹对话框 ──
-    if (showNewFolderDialog && contextMenuUri != null) {
+    if (showNewFolderDialog && pendingActionUri != null) {
         CreateItemDialog(
             title = "新建文件夹",
             hint = "文件夹名称",
-            onDismiss = { showNewFolderDialog = false; contextMenuUri = null },
+            onDismiss = { showNewFolderDialog = false; pendingActionUri = null },
             onConfirm = { name ->
-                contextMenuUri?.let { viewModel.createFolder(it, name) }
+                pendingActionUri?.let { viewModel.createFolder(it, name) }
                 showNewFolderDialog = false
-                contextMenuUri = null
+                pendingActionUri = null
             }
         )
     }
 
     // ── 重命名对话框 ──
-    if (showRenameDialog && contextMenuUri != null) {
+    if (showRenameDialog && pendingActionUri != null) {
         RenameDialog(
-            currentName = contextMenuName,
-            onDismiss = { showRenameDialog = false; contextMenuUri = null; contextMenuName = "" },
-            onConfirm = { name ->
-                contextMenuUri?.let { viewModel.renameFile(it, name) }
+            currentName = pendingActionName,
+            onDismiss = {
                 showRenameDialog = false
-                contextMenuUri = null
-                contextMenuName = ""
+                pendingActionUri = null
+                pendingActionName = ""
+            },
+            onConfirm = { name ->
+                pendingActionUri?.let { viewModel.renameFile(it, name) }
+                showRenameDialog = false
+                pendingActionUri = null
+                pendingActionName = ""
             }
         )
     }
 
     // ── 删除确认对话框 ──
-    if (showDeleteConfirm && contextMenuUri != null) {
+    if (showDeleteConfirm && pendingDeleteUri != null) {
         AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false; contextMenuUri = null },
+            onDismissRequest = { showDeleteConfirm = false; pendingDeleteUri = null },
             title = { Text("确认删除") },
             text = { Text("此操作不可撤销，确定要删除吗？") },
             confirmButton = {
                 TextButton(onClick = {
-                    contextMenuUri?.let { viewModel.deleteFile(it) }
+                    pendingDeleteUri?.let { viewModel.deleteFile(it) }
                     showDeleteConfirm = false
-                    contextMenuUri = null
+                    pendingDeleteUri = null
                 }) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false; contextMenuUri = null }) { Text("取消") }
+                TextButton(onClick = { showDeleteConfirm = false; pendingDeleteUri = null }) { Text("取消") }
             }
         )
     }

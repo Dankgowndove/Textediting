@@ -325,7 +325,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             // 更多操作（溢出菜单）
                             Box {
                                 IconButton(onClick = { showOverflowMenu = true }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+                                    Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
                                 }
                                 DropdownMenu(
                                     expanded = showOverflowMenu,
@@ -380,7 +380,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     Icon(Icons.Filled.Settings, contentDescription = "设置")
                                 }
                                 IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
-                                    Icon(Icons.Default.FolderOpen, contentDescription = "打开文件")
+                                    Icon(Icons.Filled.FolderOpen, contentDescription = "打开文件")
                                 }
                             }
                         }
@@ -446,189 +446,188 @@ fun MainScreen(viewModel: MainViewModel) {
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "文本编辑器",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(Modifier.height(24.dp))
-                            // 打开文件按钮
-                            FilledTonalButton(
-                                onClick = { openFileLauncher.launch(arrayOf("*/*")) }
-                            ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("打开文件")
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            // 新建文件按钮
-                            FilledTonalButton(
-                                onClick = { viewModel.createNewFile() }
-                            ) {
-                                Text("新建文件")
-                            }
-
-                            // ── 最近打开文件列表 ──
-                            if (recentFilesList.isNotEmpty()) {
-                                Spacer(Modifier.height(32.dp))
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    "最近打开",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    "文本编辑器",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                                Spacer(Modifier.height(8.dp))
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .widthIn(max = 420.dp)
-                                        .heightIn(max = 240.dp),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                Spacer(Modifier.height(24.dp))
+                                // 打开文件按钮
+                                FilledTonalButton(
+                                    onClick = { openFileLauncher.launch(arrayOf("*/*")) }
                                 ) {
-                                    items(recentFilesList.take(10)) { recent ->
-                                        Surface(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { viewModel.openFile(recent.uri) },
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            tonalElevation = 0.dp
-                                        ) {
-                                            Row(
+                                    Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("打开文件")
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                // 新建文件按钮
+                                FilledTonalButton(
+                                    onClick = { viewModel.createNewFile() }
+                                ) {
+                                    Text("新建文件")
+                                }
+
+                                // ── 最近打开文件列表 ──
+                                if (recentFilesList.isNotEmpty()) {
+                                    Spacer(Modifier.height(32.dp))
+                                    Text(
+                                        "最近打开",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .widthIn(max = 420.dp)
+                                            .heightIn(max = 240.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        items(recentFilesList.take(10)) { recent ->
+                                            Surface(
                                                 modifier = Modifier
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable { viewModel.openFile(recent.uri) },
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                tonalElevation = 0.dp
                                             ) {
-                                                Icon(
-                                                    Icons.Filled.Description,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(20.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                                Spacer(Modifier.width(12.dp))
-                                                Text(
-                                                    recent.displayName,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                Row(
+                                                    modifier = Modifier
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        Icons.Filled.Description,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(20.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Spacer(Modifier.width(12.dp))
+                                                    Text(
+                                                        recent.displayName,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                        } // end Box
-                } else {
-                    // ── 编辑器区域 ──
-                    // [M3 优化] 使用 Surface 包裹以获得深度层次感
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        tonalElevation = 1.dp
-                    ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .focusable(true)
-                    ) {
-                        // 加载指示器
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.align(Alignment.Center)
-                            )
-                        }
-                        // [M3 优化] 捕获 Material3 配色方案供编辑器使用
-                        val editorColorScheme = MaterialTheme.colorScheme
+                    } else {
+                        // ── 编辑器区域 ──
+                        // [M3 优化] 使用 Surface 包裹以获得深度层次感
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            tonalElevation = 1.dp
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .focusable(true)
+                            ) {
+                                // 加载指示器
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.align(Alignment.Center)
+                                    )
+                                }
+                                // [M3 优化] 捕获 Material3 配色方案供编辑器使用
+                                val editorColorScheme = MaterialTheme.colorScheme
 
-                        // LinedEditText 通过 AndroidView 集成
-                        AndroidView(
-                            factory = { ctx ->
-                                // 创建编辑器实例并配置
-                                LinedEditText(ctx).also { et ->
-                                    // 多行文本 + 禁用拼写建议
-                                    et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
-                                            EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                                    et.setHorizontallyScrolling(!wordWrap)
-                                    et.isVerticalScrollBarEnabled = true
-                                    // [Bug #6 修复] 使用 SP 单位设置字体大小，而非直接传 float（会被误当 px）
-                                    et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
-                                    et.typeface = android.graphics.Typeface.MONOSPACE  // 等宽字体
-                                    et.hint = "在此输入文本..."
-                                    et.maxLines = Int.MAX_VALUE
-                                    et.minLines = 1
+                                // LinedEditText 通过 AndroidView 集成
+                                AndroidView(
+                                    factory = { ctx ->
+                                        // 创建编辑器实例并配置
+                                        LinedEditText(ctx).also { et ->
+                                            // 多行文本 + 禁用拼写建议
+                                            et.inputType = EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or
+                                                    EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                                            et.setHorizontallyScrolling(!wordWrap)
+                                            et.isVerticalScrollBarEnabled = true
+                                            // [Bug #6 修复] 使用 SP 单位设置字体大小，而非直接传 float（会被误当 px）
+                                            et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
+                                            et.typeface = android.graphics.Typeface.MONOSPACE  // 等宽字体
+                                            et.hint = "在此输入文本..."
+                                            et.maxLines = Int.MAX_VALUE
+                                            et.minLines = 1
 
-                                    // [M3 优化] 编辑器颜色融入 Material 主题
-                                    et.colorScheme = editorColorScheme
+                                            // [M3 优化] 编辑器颜色融入 Material 主题
+                                            et.colorScheme = editorColorScheme
 
-                                    // 应用当前设置
-                                    et.showLineNumbers = showLineNumbers
-                                    et.darkMode = isDarkMode
-                                    et.highlightCurrentLine = highlightCurrentLine
-                                    et.bracketMatching = bracketMatching
-                                    et.showWhitespace = showWhitespace
+                                            // 应用当前设置
+                                            et.showLineNumbers = showLineNumbers
+                                            et.darkMode = isDarkMode
+                                            et.highlightCurrentLine = highlightCurrentLine
+                                            et.bracketMatching = bracketMatching
+                                            et.showWhitespace = showWhitespace
 
-                                    // IME 操作处理
-                                    et.setOnEditorActionListener { _, actionId, event ->
-                                        if (actionId == EditorInfo.IME_ACTION_DONE ||
-                                            (event?.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP)
-                                        ) {
-                                            et.clearFocus()
-                                            val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                                            imm.hideSoftInputFromWindow(et.windowToken, 0)
-                                            isKeyboardVisible.value = false
-                                            true
-                                        } else false
-                                    }
+                                            // IME 操作处理
+                                            et.setOnEditorActionListener { _, actionId, event ->
+                                                if (actionId == EditorInfo.IME_ACTION_DONE ||
+                                                    (event?.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP)
+                                                ) {
+                                                    et.clearFocus()
+                                                    val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                                                    imm.hideSoftInputFromWindow(et.windowToken, 0)
+                                                    isKeyboardVisible.value = false
+                                                    true
+                                                } else false
+                                            }
 
-                                    // 文本变更监听器（编辑器单向数据流的入口）
-                                    et.addTextChangedListener(object : TextWatcher {
-                                        override fun beforeTextChanged(
-                                            s: CharSequence, start: Int, count: Int, after: Int
-                                        ) {}
+                                            // 文本变更监听器（编辑器单向数据流的入口）
+                                            et.addTextChangedListener(object : TextWatcher {
+                                                override fun beforeTextChanged(
+                                                    s: CharSequence, start: Int, count: Int, after: Int
+                                                ) {}
 
-                                        override fun onTextChanged(
-                                            s: CharSequence, start: Int, before: Int, count: Int
-                                        ) {}
+                                                override fun onTextChanged(
+                                                    s: CharSequence, start: Int, before: Int, count: Int
+                                                ) {}
 
-                                        override fun afterTextChanged(s: Editable) {
-                                            // 先设置阻断标志，再通知 ViewModel
-                                            // 这样 LaunchedEffect(content) 会跳过回写
-                                            ignoreTextChange = true
-                                            viewModel.onTextChanged(s.toString())
+                                                override fun afterTextChanged(s: Editable) {
+                                                    // 先设置阻断标志，再通知 ViewModel
+                                                    // 这样 LaunchedEffect(content) 会跳过回写
+                                                    ignoreTextChange = true
+                                                    viewModel.onTextChanged(s.toString())
+                                                }
+                                            })
+
+                                            editTextRef.value = et  // 保存引用
+                                            et.requestFocus()
                                         }
-                                    })
-
-                                    editTextRef.value = et  // 保存引用
-                                    et.requestFocus()
-                                }
-                            },
-                            update = { et ->
-                                // AndroidView.update 仅更新非文本属性
-                                // 绝不在此处比较或设置文本内容！
-                                // [Bug #6 修复] 统一用 SP 单位比较和设置字体大小
-                                val targetPx = android.util.TypedValue.applyDimension(
-                                    android.util.TypedValue.COMPLEX_UNIT_SP,
-                                    fontSize.toFloat(),
-                                    et.resources.displayMetrics
+                                    },
+                                    update = { et ->
+                                        // AndroidView.update 仅更新非文本属性
+                                        // 绝不在此处比较或设置文本内容！
+                                        // [Bug #6 修复] 统一用 SP 单位比较和设置字体大小
+                                        val targetPx = android.util.TypedValue.applyDimension(
+                                            android.util.TypedValue.COMPLEX_UNIT_SP,
+                                            fontSize.toFloat(),
+                                            et.resources.displayMetrics
+                                        )
+                                        if (Math.abs(et.textSize - targetPx) > 0.5f) {
+                                            et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
+                                        }
+                                        // [M3 优化] 主题变化时同步更新编辑器配色
+                                        et.colorScheme = editorColorScheme
+                                        et.setHorizontallyScrolling(!wordWrap)
+                                        et.showLineNumbers = showLineNumbers
+                                        et.darkMode = isDarkMode
+                                        et.highlightCurrentLine = highlightCurrentLine
+                                        et.bracketMatching = bracketMatching
+                                        et.showWhitespace = showWhitespace
+                                    },
+                                    modifier = Modifier.fillMaxSize()
                                 )
-                                if (Math.abs(et.textSize - targetPx) > 0.5f) {
-                                    et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
-                                }
-                                // [M3 优化] 主题变化时同步更新编辑器配色
-                                et.colorScheme = editorColorScheme
-                                et.setHorizontallyScrolling(!wordWrap)
-                                et.showLineNumbers = showLineNumbers
-                                et.darkMode = isDarkMode
-                                et.highlightCurrentLine = highlightCurrentLine
-                                et.bracketMatching = bracketMatching
-                                et.showWhitespace = showWhitespace
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                            }
+                        }
                     }
-                    } // end Surface
-                }
             }
         }
     }
