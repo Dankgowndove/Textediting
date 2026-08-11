@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
+本文件为 AI 编程代理在此仓库中工作时提供指导。
 
 ## 构建命令
 
@@ -14,7 +14,7 @@
 
 ## 架构
 
-单 Activity MVVM Android 应用（`com.dlam.textediting`），minSdk 24，targetSdk 34，compileSdk 36。Kotlin 2.1 + Jetpack Compose + Material 3。
+单 Activity MVVM Android 应用（`com.dlam.textediting`），minSdk 24，targetSdk 34，compileSdk 36。Kotlin 2.1 + Jetpack Compose + Material 3。**精简版仅保留单文件打开/编辑/保存、撤销/重做、行号显示与文本搜索**；不包含多标签页、文件树、语法高亮、文本统计、最近文件或自动保存。
 
 ### 数据流（编辑器正确性的关键）
 
@@ -35,28 +35,29 @@
 | 文件 | 职责 |
 |------|------|
 | `MainActivity.kt` | 入口点。处理 `VIEW`/`EDIT` 意图。singleTask 启动模式。 |
-| `MainViewModel.kt` | 所有应用状态。文件 I/O、标签页管理、搜索（本地 + 全局）、文件树、全局替换。 |
-| `MainScreen.kt` | 顶层 Compose UI。工具栏、标签栏、搜索栏、包装 `LinedEditText` 的 `AndroidView`、所有对话框。 |
-| `editor/LinedEditText.kt` | 自定义 `AppCompatEditText`，带 Canvas 绘制的行号栏。**硬件加速图层**使滚动时不会重复触发 `onDraw`。仅绘制可见行 + 2 行缓冲区。使用可复用 `CharArray` 实现零分配行号格式化。 |
+| `MainViewModel.kt` | 应用状态。文件 I/O（打开/保存/另存/新建）、文本搜索（大小写/全字匹配）、撤销/重做。 |
+| `MainScreen.kt` | 顶层 Compose UI。工具栏、搜索栏、包装 `LinedEditText` 的 `AndroidView`、跳转行/设置对话框。 |
+| `editor/LinedEditText.kt` | 自定义 `AppCompatEditText`，带 Canvas 绘制的行号栏。仅绘制可见行 + 3 行缓冲，可复用 `CharArray` 零分配格式化行号。行号宽度在绘制时按需扩宽（只增不减），不再在 `onDraw` 内 `requestLayout`，避免闪帧/抖动。垂直对齐以 `extendedPaddingTop` 为基准，滚动用 `postInvalidateOnAnimation` 刷新。 |
 | `UndoManager.kt` | 全文本快照撤销/重做，最多 200 步。`record()` 跳过重复内容（先快速比较长度）。`prepareUndo()`/`prepareRedo()` 必须始终在 finally 块中与 `finishUndoRedo()` 成对调用。 |
-| `SettingsManager.kt` | SharedPreferences 包装器，以 `StateFlow` 形式暴露设置供响应式 UI 使用。设置项：字体大小（10-24sp）、最大标签数（5-20）、行号开关、自动换行开关、自动保存间隔（0/30/60/120/300 秒）。 |
-| `FileTreeState.kt` | 数据类：`FileTreeState`、`FileNode`、`OpenTab`、`GlobalSearchResult`。 |
+| `SettingsManager.kt` | SharedPreferences 包装器，以 `StateFlow` 形式暴露设置供响应式 UI 使用。设置项：字体大小（10-24sp）、行号开关、自动换行开关、主题模式（跟随系统/浅色/深色）。 |
+| `dialogs/SearchBar.kt`（`EditorComponents.kt`） | 文本搜索栏：输入、匹配计数、上/下导航、大小写/全字过滤。 |
+| `dialogs/GoToLineDialog.kt` | 跳转到行对话框（1-based 行号）。 |
+| `dialogs/SettingsDialog.kt` | 设置对话框（字体大小、行号、换行、主题）。 |
 | `editor/EditorColors.kt` | 编辑器控件和行号栏的硬编码亮色/暗色配色方案（非 Material 主题色）。 |
 | `ui/theme/` | Material 3 主题，支持动态取色（Android 12+）。 |
-| `util/StatsComputer.kt` | 文本统计计算（字符/单词/行数统计、中日韩字符检测、阅读时间估算）。 |
 
 ### 依赖（版本目录：`gradle/libs.versions.toml`）
 
-- `androidx.documentfile` — SAF 文件操作
 - `androidx.appcompat` — `AppCompatEditText` 基类
 - `androidx.activity:activity-compose` — Compose Activity 集成
 - Material 3 + Material Icons Extended
-- 无网络、数据库或 DI 库。无 Kotlin 序列化。
+- 无网络、数据库、SAF DocumentFile 或 DI 库。无 Kotlin 序列化。
 
 ### 文件系统访问
 
-所有文件 I/O 均通过 `DocumentFile` 使用 Android 的**存储访问框架（SAF）**。目录 URI 会调用 `takePersistableUriPermission()` 获取读写权限。文件树采用延迟加载，配合按目录缓存（ViewModel 中的 `dirCache`）—— 展开目录时仅加载其直接子节点。缓存在全量刷新或根目录变更时被清除。文件类型过滤（全局搜索/替换）使用硬编码的文本/代码文件扩展名集合。
+所有文件 I/O 均通过 Android 的**存储访问框架（SAF）**与 `ContentResolver` 完成（`openInputStream`/`openOutputStream`），针对单个文件 URI 操作，UTF-8 编码。不维护目录树或目录级权限，不依赖 `androidx.documentfile`。
 
-### 标签页管理
+## 移除项记录
 
-标签页存储内容 + savedText + isModified 标志的快照。切换标签页时会将当前编辑器状态序列化到旧标签页的 `OpenTab` 记录中，并从新标签页的记录中恢复。标签页数量有上限（用户可配置）；达到上限时，最旧的未修改标签页会被淘汰。若所有标签页均已修改，则拒绝打开并显示 snackbar 提示。
+以下功能/文件曾在早期版本中存在，当前精简版已移除：
+`FileTreePanel.kt`、`FileTreeState.kt`、`RecentFilesManager.kt`、`dialogs/StatsDialog.kt`、`editor/SyntaxHighlighter.kt`、`util/StatsComputer.kt`，以及多标签页、文件树、全局搜索/替换、语法高亮、文本统计、最近文件、自动保存及其设置项。

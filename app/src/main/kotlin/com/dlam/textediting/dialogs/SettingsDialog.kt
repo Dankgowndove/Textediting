@@ -12,9 +12,10 @@ import androidx.compose.ui.unit.dp
 /**
  * 设置对话框
  *
- * 提供所有用户可配置选项的 UI，包括：
- * - 字体大小、最大标签数、自动保存间隔（下拉菜单选择）
- * - 行号显示、自动换行、语法高亮、括号匹配等（开关切换）
+ * 提供所有可配置选项的 UI，包括：
+ * - 字体大小（下拉菜单选择）
+ * - 主题模式（下拉菜单选择）
+ * - 行号显示、自动换行（开关切换）
  *
  * 所有设置实时生效，无需重启应用。变更通过 SettingsManager
  * 同步更新 StateFlow 和 SharedPreferences。
@@ -29,20 +30,12 @@ fun SettingsDialog(
 ) {
     // ── 从 SettingsManager 收集所有设置状态 ──
     val fontSize by settings.fontSize.collectAsState()
-    val maxTabs by settings.maxTabs.collectAsState()
     val showLineNumbers by settings.showLineNumbers.collectAsState()
     val wordWrap by settings.wordWrap.collectAsState()
-    val autoSaveInterval by settings.autoSaveInterval.collectAsState()
-    val syntaxHighlight by settings.syntaxHighlight.collectAsState()
-    val bracketMatching by settings.bracketMatching.collectAsState()
-    val highlightCurrentLine by settings.highlightCurrentLine.collectAsState()
-    val showWhitespace by settings.showWhitespace.collectAsState()
     val darkThemeMode by settings.darkThemeMode.collectAsState()
 
     // ── 下拉菜单展开状态 ──
     var showFontSizeMenu by remember { mutableStateOf(false) }
-    var showMaxTabsMenu by remember { mutableStateOf(false) }
-    var showAutoSaveMenu by remember { mutableStateOf(false) }
     var showThemeMenu by remember { mutableStateOf(false) }
 
     // 主题模式标签
@@ -52,21 +45,11 @@ fun SettingsDialog(
         2 to "深色主题"
     )
 
-    // 自动保存间隔 → 显示标签映射
-    val autoSaveLabels = mapOf(
-        0 to "关闭",
-        30 to "30 秒",
-        60 to "1 分钟",
-        120 to "2 分钟",
-        300 to "5 分钟"
-    )
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("设置") },
         text = {
             Column(
-                // 设置过多时允许垂直滚动
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -102,44 +85,6 @@ fun SettingsDialog(
                                 onClick = {
                                     settings.setFontSize(size)
                                     showFontSizeMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // ── 最大标签数（M3 ExposedDropdownMenuBox）──
-                ExposedDropdownMenuBox(
-                    expanded = showMaxTabsMenu,
-                    onExpandedChange = { showMaxTabsMenu = it }
-                ) {
-                    OutlinedTextField(
-                        value = "$maxTabs",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("最大标签数") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showMaxTabsMenu) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        singleLine = true,
-                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = showMaxTabsMenu,
-                        onDismissRequest = { showMaxTabsMenu = false }
-                    ) {
-                        settings.getAllMaxTabs().forEach { count ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "$count",
-                                        fontWeight = if (count == maxTabs)
-                                            androidx.compose.ui.text.font.FontWeight.Bold
-                                        else androidx.compose.ui.text.font.FontWeight.Normal
-                                    )
-                                },
-                                onClick = {
-                                    settings.setMaxTabs(count)
-                                    showMaxTabsMenu = false
                                 }
                             )
                         }
@@ -210,106 +155,6 @@ fun SettingsDialog(
                                 onClick = {
                                     settings.setDarkThemeMode(mode)
                                     showThemeMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider()
-
-                // ── 语法高亮（开关）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("语法高亮", style = MaterialTheme.typography.bodyMedium)
-                    Switch(
-                        checked = syntaxHighlight,
-                        onCheckedChange = { settings.setSyntaxHighlight(it) }
-                    )
-                }
-
-                HorizontalDivider()
-
-                // ── 括号匹配（开关）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("括号匹配", style = MaterialTheme.typography.bodyMedium)
-                    Switch(
-                        checked = bracketMatching,
-                        onCheckedChange = { settings.setBracketMatching(it) }
-                    )
-                }
-
-                HorizontalDivider()
-
-                // ── 当前行高亮（开关）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("当前行高亮", style = MaterialTheme.typography.bodyMedium)
-                    Switch(
-                        checked = highlightCurrentLine,
-                        onCheckedChange = { settings.setHighlightCurrentLine(it) }
-                    )
-                }
-
-                HorizontalDivider()
-
-                // ── 显示空白字符（开关）──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("显示空白字符", style = MaterialTheme.typography.bodyMedium)
-                    Switch(
-                        checked = showWhitespace,
-                        onCheckedChange = { settings.setShowWhitespace(it) }
-                    )
-                }
-
-                HorizontalDivider()
-
-                // ── 自动保存（M3 ExposedDropdownMenuBox）──
-                ExposedDropdownMenuBox(
-                    expanded = showAutoSaveMenu,
-                    onExpandedChange = { showAutoSaveMenu = it }
-                ) {
-                    OutlinedTextField(
-                        value = autoSaveLabels[autoSaveInterval] ?: "关闭",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("自动保存") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showAutoSaveMenu) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        singleLine = true,
-                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = showAutoSaveMenu,
-                        onDismissRequest = { showAutoSaveMenu = false }
-                    ) {
-                        settings.getAllAutoSaveIntervals().forEach { interval ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        autoSaveLabels[interval] ?: "$interval 秒",
-                                        fontWeight = if (interval == autoSaveInterval)
-                                            androidx.compose.ui.text.font.FontWeight.Bold
-                                        else androidx.compose.ui.text.font.FontWeight.Normal
-                                    )
-                                },
-                                onClick = {
-                                    settings.setAutoSaveInterval(interval)
-                                    showAutoSaveMenu = false
                                 }
                             )
                         }

@@ -19,9 +19,6 @@ appcompat = "1.7.0"               # AppCompat
 # Compose
 composeBom = "2025.10.01"         # Compose BOM（统一管理 Compose 库版本）
 
-# 文件访问
-documentfile = "1.0.1"            # SAF DocumentFile
-
 [plugins]
 # Android 应用插件
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -49,5 +46,4 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 
-# SAF 文件访问
-androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
+

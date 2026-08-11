@@ -84,9 +84,6 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)  // Material Icons 扩展库
 
-    // SAF 文件访问
-    implementation(libs.androidx.documentfile)
-
     // 调试工具
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)

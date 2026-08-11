@@ -232,7 +232,9 @@ class LinedEditText(
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
         if (showLineNumbers || highlightCurrentLine) {
-            invalidate()  // 触发重新绘制
+            // [Bug #7 修复] 用 postInvalidateOnAnimation 让行号随绘制节拍更新，
+            // 减少低刷新率下滚动时行号滞后于文本的撕裂感
+            postInvalidateOnAnimation()
         }
     }
 
@@ -451,9 +453,10 @@ class LinedEditText(
     /**
      * 绘制行号栏
      *
-     * [Bug #2 修复] 移除了 `neededDigits > 5` 的错误限制条件，改为只要
-     * 像素宽度不足就立即扩宽，并同步调用 recomputePadding + requestLayout。
+     * [Bug #2 修复] 移除了 `neededDigits > 5` 的错误限制条件，像素宽度不足就扩宽。
      * [Bug #4 修复] baseline 计算改用 extendedPaddingTop。
+     * [Bug #7 修复] 宽度扩容在绘制路径内完成但不提前 return、不显式 requestLayout，
+     * 本帧即用新宽度绘制，配合 recomputePadding 触发的常规重排，避免闪帧与抖动。
      * 仅绘制可见行 ± 3 行缓冲区，大文件也保持常量开销。
      */
     private fun drawGutter(canvas: Canvas, layout: Layout, viewHeight: Int) {
@@ -464,16 +467,18 @@ class LinedEditText(
         val visibleHeight = bottom - top
         if (visibleHeight <= 0) return
 
-        // [Bug #2 修复] 只要像素宽度不足就扩宽，不再有位数限制
+        // [Bug #2 修复] 只要像素宽度不足就扩宽（且只增不减）。
+        // [Bug #7 修复] 不再在绘制阶段提前 return 跳过行号，也不在这里 requestLayout：
+        // 原实现在 onDraw 内测量并扩容后直接 return，导致本帧"文本已画、行号缺失"的闪帧，
+        // 且每次行数位数变化都触发整视图重布局，造成行号栏抖动/跳动。
+        // 现在改在本帧用新宽度直接绘制，recomputePadding() 内部的 setPadding 会发起
+        // requestLayout + invalidate，交给常规布局流程做后续重排即可。
         val maxLine = layout.lineCount
         val neededGutter = gutterMarginPx * 2 +
                 lineNumberPaint.measureText("0".repeat(maxLine.toString().length))
         if (neededGutter > gutterWidthPx) {
             gutterWidthPx = neededGutter + 8f
             recomputePadding()
-            requestLayout()
-            // requestLayout 会触发新一轮 onDraw，本次直接返回避免用旧尺寸绘制
-            return
         }
 
         // 裁剪到行号栏区域
@@ -510,6 +515,12 @@ class LinedEditText(
      * 使用可复用的 CharArray 进行零分配数字格式化。
      */
     private fun drawLineNumber(canvas: Canvas, num: Int, x: Float, baseline: Float) {
+        // [Bug #7 修复] 防止行号超过 numBuf 容量（10 位）导致越界写：行号 ≥ 10^10
+        // 时直接回退到 String 绘制，保证大文件极端情况不崩溃
+        if (num >= 10_000_000_000L) {
+            canvas.drawText(num.toString(), x, baseline, lineNumberPaint)
+            return
+        }
         var n = num
         var pos = numBuf.size
         // 整数转字符（从右到左填充缓冲区）
