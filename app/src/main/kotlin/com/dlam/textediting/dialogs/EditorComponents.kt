@@ -2,7 +2,6 @@ package com.dlam.textediting.dialogs
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -16,8 +15,7 @@ import androidx.compose.ui.unit.dp
 /**
  * 文本搜索栏组件
  *
- * 提供搜索输入框、匹配计数显示、上/下一个导航按钮以及搜索选项。
- * 支持大小写敏感和全字匹配两种过滤模式。
+ * 提供搜索输入框、匹配计数显示、上/下一个导航按钮。
  *
  * @param query 当前搜索查询
  * @param onQueryChange 查询文本变化回调
@@ -26,10 +24,6 @@ import androidx.compose.ui.unit.dp
  * @param onPrevious 上一个匹配项回调
  * @param onNext 下一个匹配项回调
  * @param onClose 关闭搜索回调
- * @param isCaseSensitive 是否大小写敏感
- * @param isWholeWord 是否全字匹配
- * @param onToggleCaseSensitive 切换大小写敏感回调
- * @param onToggleWholeWord 切换全字匹配回调
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,11 +34,7 @@ fun SearchBar(
     currentIndex: Int,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onClose: () -> Unit,
-    isCaseSensitive: Boolean = false,
-    isWholeWord: Boolean = false,
-    onToggleCaseSensitive: () -> Unit = {},
-    onToggleWholeWord: () -> Unit = {}
+    onClose: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         // 搜索输入行
@@ -97,37 +87,6 @@ fun SearchBar(
             // 关闭搜索
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "关闭搜索")
-            }
-        }
-        // 搜索选项过滤 Chips
-        if (query.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 大小写敏感切换
-                FilterChip(
-                    selected = isCaseSensitive,
-                    onClick = onToggleCaseSensitive,
-                    label = { Text("Aa", style = MaterialTheme.typography.bodySmall) },
-                    leadingIcon = if (isCaseSensitive) {
-                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    } else null,
-                    modifier = Modifier.height(28.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                // 全字匹配切换
-                FilterChip(
-                    selected = isWholeWord,
-                    onClick = onToggleWholeWord,
-                    label = { Text("全字", style = MaterialTheme.typography.bodySmall) },
-                    leadingIcon = if (isWholeWord) {
-                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    } else null,
-                    modifier = Modifier.height(28.dp)
-                )
             }
         }
     }

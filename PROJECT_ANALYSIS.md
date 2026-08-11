@@ -2,7 +2,7 @@
 
 > **版本**: 2.0 | **分析日期**: 2026-08-11 | **许可证**: MIT
 >
-> 本版为**精简版**：只保留单文件打开/编辑/保存、撤销/重做、行号显示与文本搜索（含跳转行）。已移除多标签页、文件树、全局搜索/替换、语法高亮、文本统计、最近文件、自动保存及配套设置项。
+> 本版为**精简版**：只保留单文件打开/编辑/保存、行号显示与文本搜索（含跳转行）。已移除多标签页、文件树、全局搜索/替换、语法高亮、文本统计、最近文件、自动保存、撤销/重做及配套设置项。
 
 ---
 
@@ -28,8 +28,8 @@
 | 分类 | 特性 |
 |------|------|
 | 文件 | SAF 打开/另存、新建空白文档、`VIEW`/`EDIT` 意图 |
-| 编辑 | 文本输入、200 步撤销/重做、行号显示、自动换行、字体、暗色模式 |
-| 搜索 | 当前文件查找、大小写/全字匹配、上一个/下一个、跳转到行、复制行号 |
+| 编辑 | 文本输入、行号显示、自动换行、字体、暗色模式 |
+| 搜索 | 当前文件查找、上一个/下一个、跳转到行 |
 | 编辑控件 | 行号栏（Canvas）、当前行高亮、括号匹配、空白字符可视化（默认关闭） |
 
 ---
@@ -48,7 +48,6 @@ Textediting/
 │           ├── MainActivity.kt        # 入口 Activity（VIEW/EDIT 意图）
 │           ├── MainScreen.kt          # 主界面 Compose（工具栏/搜索/编辑器）
 │           ├── MainViewModel.kt       # 核心 ViewModel（状态与文件/搜索逻辑）
-│           ├── UndoManager.kt         # 撤销/重做管理器
 │           ├── SettingsManager.kt     # 设置管理器
 │           ├── editor/
 │           │   ├── LinedEditText.kt   # 自定义编辑器控件（行号绘制）
@@ -71,13 +70,13 @@ Textediting/
 ```
 MainActivity
   └── MainScreen (Compose)
-        ├── TopAppBar（打开/新建/保存/撤销/重做/搜索/更多菜单）
+        ├── TopAppBar（打开/新建/保存/搜索/更多菜单，可横向滚动）
         ├── SearchBar（AnimatedVisibility）
         └── LinedEditText（AndroidView）
                 ├── Gutter（Canvas 行号）
                 └── AppCompatEditText 内容区
                 ↕ StateFlow / SharedFlow
-  MainViewModel（编辑状态、搜索状态、UndoManager、SettingsManager）
+  MainViewModel（编辑状态、搜索状态、SettingsManager）
 ```
 
 ### 3.2 设计模式
@@ -86,7 +85,6 @@ MainActivity
 |------|---------|
 | MVVM | Activity → ViewModel → StateFlow → Compose UI 单向数据流 |
 | 观察者模式 | StateFlow / SharedFlow 驱动 UI 响应式更新 |
-| 快照模式 | UndoManager 全文本快照实现撤销/重做 |
 
 ---
 
@@ -102,13 +100,13 @@ MainActivity
 
 顶层 Compose UI，组合工具栏、搜索栏、编辑器与对话框。
 
-- 工具栏动作（文件打开时）：搜索、撤销、重做、保存、更多（复制行号 / 跳转行 / 设置）
+- 工具栏动作（文件打开时）：搜索、保存、更多（跳转行 / 设置），支持左右滑动访问
 - 空状态页：打开文件 / 新建文件 两个入口
 - 编辑器通过 `AndroidView(LinedEditText)` 集成，`update` 仅同步非文本属性
 
 ### 4.3 ViewModel 层 —— MainViewModel.kt
 
-状态（StateFlow）：`textContent`、`isModified`、`currentUri`、`fileName`、`isLoading`、搜索相关（`searchQuery`/`isSearchVisible`/`searchMatchCount`/`currentSearchIndex`/`searchPositions`/`isCaseSensitive`/`isWholeWord`）、`settings`。
+状态（StateFlow）：`textContent`、`isModified`、`currentUri`、`fileName`、`isLoading`、搜索相关（`searchQuery`/`isSearchVisible`/`searchMatchCount`/`currentSearchIndex`/`searchPositions`）、`settings`。
 
 事件（SharedFlow）：`snackbarEvent`。
 
@@ -117,8 +115,8 @@ MainActivity
 | 模块 | 方法 |
 |------|------|
 | 文件 I/O | `openFile()`、`createNewFile()`、`saveFile()`、`saveAs()`、`getFileName()` |
-| 文本变更 | `onTextChanged()`、`onUndoRedoApplied()` |
-| 搜索 | `toggleSearch()`、`dismissSearch()`、`onSearchQueryChanged()`、`searchNext()`、`searchPrevious()`、`getSearchPosition()`、`toggleCaseSensitive()`、`toggleWholeWord()`、`findAllPositions()` |
+| 文本变更 | `onTextChanged()` |
+| 搜索 | `toggleSearch()`、`dismissSearch()`、`onSearchQueryChanged()`、`searchNext()`、`searchPrevious()`、`getSearchPosition()`、`findAllPositions()` |
 
 ### 4.4 编辑器核心 —— LinedEditText.kt
 
@@ -133,17 +131,13 @@ MainActivity
 4. drawWhitespace()                ← 空白字符可视化
 ```
 
-### 4.5 UndoManager.kt
-
-全文本快照撤销/重做，`maxHistory=200`，`record()` 对重复内容（先比较长度再全文比较）跳过，避免无效快照。`prepareUndo()`/`prepareRedo()` 需与 `finishUndoRedo()` 配对。
-
-### 4.6 SettingsManager.kt
+### 4.5 SettingsManager.kt
 
 基于 SharedPreferences，暴露为 StateFlow。设置项：字体大小、显示行号、自动换行、主题模式。
 
-### 4.7 对话框
+### 4.6 对话框
 
-- `SearchBar`：搜索输入、匹配计数、上/下导航、大小写/全字过滤
+- `SearchBar`：搜索输入、匹配计数、上/下导航
 - `GoToLineDialog`：数字输入 + 行号范围校验（1..N），跳转调用 `LinedEditText.scrollToLine()`
 - `SettingsDialog`：字体大小 / 主题模式下拉 + 行号 / 换行开关
 
@@ -159,7 +153,7 @@ MainActivity
                 ├── ignoreTextChange == true → 跳过回写，清除标志
                 └── 否则 → EditText.setText(content)  ← 仅外部变更走这里
 
-外部变更（打开文件/撤销/重做）：ViewModel 更新 _textContent → LaunchedEffect → setText()
+外部变更（打开文件）：ViewModel 更新 _textContent → LaunchedEffect → setText()
 ```
 
 ---
@@ -172,14 +166,14 @@ MainActivity
 - 可复用 `CharArray(10)` 零分配格式化行号
 - 行号右侧对齐，行号栏底色 + 分割线
 
-### 本轮修复（Bug #7）
+### 本轮修复（Bug #8）
 
-修复历史上多次反复的"行号显示有问题"问题，根因与对策：
+修复真机验证仍存在的"行号显示有问题"问题（错位、数字不对应、滚动滞后），根因与对策：
 
-1. **行号宽度在 `onDraw` 内测量并扩容**：原实现一旦宽度不足就就地改宽并 `requestLayout()` 后提前 `return`，导致本帧"文本已画、行号缺失"的闪帧，且每次行数位数变化都触发整视图重布局，造成抖动/跳动。
-   → 改为：需要扩宽时直接累加 `gutterWidthPx` 并调用 `recomputePadding()`（其内部 `setPadding` 会发起 `requestLayout + invalidate`），**不在绘制路径中提前 return**，本帧即用新宽度绘制。
-2. **滚动刷新滞后**：原用 `invalidate()`，低刷新率设备滚动时行号滞后于文本。
-   → 改为 `postInvalidateOnAnimation()`，行号随绘制节拍更新。
+1. **行号宽度在 `onDraw`（绘制阶段）内测量并改 padding**：绘制阶段修改 padding 会触发 `requestLayout`，导致本帧文本（旧 padding）与行号（新宽度）**错位**，且行数位数变化时整视图反复重排抖动。
+   → 改为：新增 `updateGutterWidth()`，在 `onLayout`（布局阶段）按总行数位数计算宽度并调整 padding（宽度只增不减，最多多一次布局后稳定）；`drawGutter()` 只读宽度，绘制路径**零测量、零分配**。
+2. **滚动滞后/拖影**：滚动时每帧执行 `measureText("0".repeat(...))`（字符串分配 + 测量）。
+   → 移除绘制阶段的宽度计算后，滚动路径无分配；保留 `postInvalidateOnAnimation()` 随绘制节拍刷新。
 3. **行号越界防护**：行号 ≥ 10^10 时可能冲垮 `CharArray(10)` 缓冲。
    → 增加 `drawText(num.toString())` 兜底分支。
 4. **垂直对齐**：行号 baseline 与当前行高亮均以 `extendedPaddingTop` 为基准，与 TextView 内部文本绘制偏移保持一致，确保滚动、软键盘弹出后仍逐行对齐。
@@ -219,4 +213,6 @@ MainActivity
 | 语法高亮 | `editor/SyntaxHighlighter.kt` 及高亮管线 |
 | 文本统计 | `dialogs/StatsDialog.kt`、`util/StatsComputer.kt` |
 | 最近文件 | `RecentFilesManager.kt` |
+| 撤销/重做 | `UndoManager.kt`、顶栏撤销/重做按钮及 `onUndoRedoApplied()` |
+| 搜索过滤选项 | `isCaseSensitive`/`isWholeWord` 状态、`toggleCaseSensitive()`/`toggleWholeWord()`、SearchBar 的 FilterChip |
 | 自动保存/最近相关设置 | SettingsManager/SettingsDialog 中对应项 |

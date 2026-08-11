@@ -25,9 +25,8 @@ import java.io.InputStreamReader
  *
  * ## 核心职责
  * - 文件操作：打开、保存、另存为、新建
- * - 文本搜索：查找/替换、大小写/全字匹配、上一个/下一个
+ * - 文本搜索：查找、上一个/下一个
  * - 跳转到行
- * - 撤销/重做：委托给 UndoManager
  *
  * @param application Android Application 实例
  */
@@ -84,24 +83,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 所有匹配位置列表 */
     val searchPositions: StateFlow<List<Int>> = _searchPositions.asStateFlow()
 
-    private val _isCaseSensitive = MutableStateFlow(false)
-    val isCaseSensitive: StateFlow<Boolean> = _isCaseSensitive.asStateFlow()
-
-    private val _isWholeWord = MutableStateFlow(false)
-    val isWholeWord: StateFlow<Boolean> = _isWholeWord.asStateFlow()
-
-    // ════════════════════════════════════════════
-    //  撤销/重做
-    // ════════════════════════════════════════════
-
-    /** 撤销/重做管理器实例 */
-    val undoManager = UndoManager()
-    /** 上次保存时的文本内容，用于比较是否修改 */
-    private var savedText: String = ""
-
-    val canUndo: Boolean get() = undoManager.canUndo
-    val canRedo: Boolean get() = undoManager.canRedo
-
     // ════════════════════════════════════════════
     //  事件和通知
     // ════════════════════════════════════════════
@@ -118,7 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 通过 SAF 打开文件
      *
      * 在 IO 线程读取文件内容，UTF-8 编码。成功后更新文件名、URI、
-     * 文本内容、修改标记与撤销历史。
+     * 文本内容与修改标记。
      *
      * @param uri 文件的 SAF URI
      */
@@ -142,10 +123,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _fileName.value = name
                 _currentUri.value = uri
                 _textContent.value = text
-                savedText = text
                 _isModified.value = false
-                undoManager.clear()
-                undoManager.record(text)
                 _snackbarEvent.emit("已打开：$name")
             } catch (e: Exception) {
                 _snackbarEvent.emit("打开失败：${e.message}")
@@ -161,32 +139,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _fileName.value = "无标题"
         _currentUri.value = null
         _textContent.value = ""
-        savedText = ""
         _isModified.value = false
-        undoManager.clear()
-        undoManager.record("")
     }
 
     /**
      * 文本变更处理
      *
      * 由 TextWatcher.afterTextChanged 调用。
-     * 更新文本内容、修改标记和撤销历史。
+     * 更新文本内容并标记为已修改。
      */
     fun onTextChanged(newText: String) {
         _textContent.value = newText
-        _isModified.value = newText != savedText
-        undoManager.record(newText)
-    }
-
-    /**
-     * 撤销/重做操作将文本写入 EditText 后，调用此方法同步 ViewModel 状态。
-     *
-     * 调用时机：在 prepareUndo/prepareRedo + et.setText() 之后、finishUndoRedo() 之前调用。
-     */
-    fun onUndoRedoApplied(text: String) {
-        _textContent.value = text
-        _isModified.value = text != savedText
+        // 编辑即标记为已修改（无需全文比较，撤销历史已移除）
+        _isModified.value = true
     }
 
     /** 保存当前文件到原始 URI */
@@ -202,7 +167,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         os.write(text.toByteArray(Charsets.UTF_8))
                     } ?: throw Exception("无法写入文件")
                 }
-                savedText = text
                 _isModified.value = false
                 _snackbarEvent.emit("已保存")
             } catch (e: Exception) {
@@ -225,7 +189,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _currentUri.value = uri
                 _fileName.value = name
-                savedText = text
                 _isModified.value = false
                 _snackbarEvent.emit("已保存")
             } catch (e: Exception) {
@@ -305,8 +268,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 在全文文本中查找所有匹配位置
      *
-     * 支持大小写敏感和全字匹配两种过滤模式。
-     *
      * @param text 全文文本
      * @param query 搜索词
      * @return 所有匹配的起始位置列表
@@ -314,37 +275,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun findAllPositions(text: String, query: String): List<Int> {
         val positions = mutableListOf<Int>()
         if (query.isEmpty()) return positions
-        val caseSensitive = _isCaseSensitive.value
-        val searchText = if (caseSensitive) text else text.lowercase()
-        val searchQuery = if (caseSensitive) query else query.lowercase()
-        val wholeWord = _isWholeWord.value
-        var index = searchText.indexOf(searchQuery, 0)
+        var index = text.indexOf(query, 0)
         while (index >= 0) {
-            // 全字匹配：检查匹配前后的字符是否为字母/数字
-            if (wholeWord) {
-                val before = if (index > 0) searchText[index - 1] else ' '
-                val after = if (index + searchQuery.length < searchText.length) searchText[index + searchQuery.length] else ' '
-                if (before.isLetterOrDigit() || after.isLetterOrDigit()) {
-                    index = searchText.indexOf(searchQuery, index + 1)
-                    continue
-                }
-            }
             positions.add(index)
-            index = searchText.indexOf(searchQuery, index + 1)
+            index = text.indexOf(query, index + 1)
         }
         return positions
-    }
-
-    /** 切换大小写敏感搜索选项，如有查询则重新搜索 */
-    fun toggleCaseSensitive() {
-        _isCaseSensitive.value = !_isCaseSensitive.value
-        if (_searchQuery.value.isNotEmpty()) performSearch(_searchQuery.value)
-    }
-
-    /** 切换全字匹配搜索选项，如有查询则重新搜索 */
-    fun toggleWholeWord() {
-        _isWholeWord.value = !_isWholeWord.value
-        if (_searchQuery.value.isNotEmpty()) performSearch(_searchQuery.value)
     }
 
     // ════════════════════════════════════════════

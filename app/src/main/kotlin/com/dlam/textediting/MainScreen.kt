@@ -1,7 +1,5 @@
 package com.dlam.textediting
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.text.Editable
 import android.text.TextWatcher
@@ -17,7 +15,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -35,13 +36,13 @@ import com.dlam.textediting.editor.LinedEditText
  * 主界面 Composable
  *
  * 这是整个应用的顶层 UI 组件，组合了所有子组件：
- * - 顶部工具栏（TopAppBar）：文件操作、撤销/重做、搜索、更多菜单
+ * - 顶部工具栏（TopAppBar）：文件操作、搜索、更多菜单（可横向滚动）
  * - 搜索栏（SearchBar）：文本搜索
  * - 编辑器区域：AndroidView 包装的 LinedEditText
  * - 对话框：跳转到行、设置
  *
  * ## 编辑器单向数据流
- * 用户输入通过 `ignoreTextChange` 标志与外部变更（打开文件/撤销/重做）
+ * 用户输入通过 `ignoreTextChange` 标志与外部变更（打开文件）
  * 解耦，防止 Compose ↔ EditText 之间的反馈循环导致光标跳动。
  *
  * @param viewModel 主 ViewModel，持有所有应用状态
@@ -60,8 +61,6 @@ fun MainScreen(viewModel: MainViewModel) {
     val currentSearchIndex by viewModel.currentSearchIndex.collectAsState()
     val currentUri by viewModel.currentUri.collectAsState()
     val lineCount by remember { derivedStateOf { content.lines().size } }  // 派生的行数
-    val isCaseSensitive by viewModel.isCaseSensitive.collectAsState()
-    val isWholeWord by viewModel.isWholeWord.collectAsState()
     // ── 设置项 ──
     val fontSize by viewModel.settings.fontSize.collectAsState()
     val showLineNumbers by viewModel.settings.showLineNumbers.collectAsState()
@@ -78,7 +77,6 @@ fun MainScreen(viewModel: MainViewModel) {
 
     // 编辑器引用和状态
     val editTextRef = remember { mutableStateOf<LinedEditText?>(null) }  // EditText 弱引用
-    val isKeyboardVisible = remember { mutableStateOf(false) }            // 键盘可见状态
     var ignoreTextChange by remember { mutableStateOf(false) }            // 阻断回写标志
 
     // [M3 优化] 根据用户设置或系统决定暗色模式
@@ -112,7 +110,7 @@ fun MainScreen(viewModel: MainViewModel) {
 
     // ── 外部文本变更同步到编辑器 ──
     // 这是编辑器单向数据流的关键：仅当文本变更是由外部触发时
-    // （打开文件/撤销/重做）才更新 EditText 内容
+    // （打开文件）才更新 EditText 内容
     LaunchedEffect(content) {
         if (ignoreTextChange) {
             // 用户输入触发的变更：跳过回写，仅清除标志
@@ -138,18 +136,21 @@ fun MainScreen(viewModel: MainViewModel) {
     //  返回键处理
     // ════════════════════════════════════════════
 
-    // 优先隐藏键盘，其次关闭搜索
-    if (isKeyboardVisible.value) {
-        BackHandler {
+    // [Bug #8 修复] 用 WindowInsets.ime 检测软键盘可见性（Compose 标准做法），
+    // 替代手动布尔跟踪 —— 触摸编辑器弹出键盘等场景都能正确反映。
+    // 键盘弹出时优先隐藏键盘（系统默认 Back 行为），否则关闭搜索。
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    val imeVisible = imeBottom > 0
+    BackHandler(enabled = imeVisible || isSearchVisible) {
+        if (imeVisible) {
             editTextRef.value?.let { et ->
                 et.clearFocus()
                 val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.hideSoftInputFromWindow(et.windowToken, 0)
-                isKeyboardVisible.value = false
             }
+        } else {
+            viewModel.dismissSearch()
         }
-    } else if (isSearchVisible) {
-        BackHandler(onBack = viewModel::dismissSearch)
     }
 
     // ── 计算派生 UI 状态 ──
@@ -187,108 +188,64 @@ fun MainScreen(viewModel: MainViewModel) {
                     containerColor = MaterialTheme.colorScheme.surface
                 ),
                 actions = {
-                    if (isFileOpen) {
-                        // ── 文件已打开时的工具栏按钮 ──
-                        // 搜索切换
-                        IconButton(onClick = { viewModel.toggleSearch() }) {
-                            Icon(Icons.Filled.Search, contentDescription = "搜索")
-                        }
-                        // [Bug #5 修复] 撤销：操作完成后同步 ViewModel 状态
-                        IconButton(
-                            onClick = {
-                                val et = editTextRef.value ?: return@IconButton
-                                val result = viewModel.undoManager.prepareUndo()
-                                if (result != null) {
-                                    try {
-                                        ignoreTextChange = true   // 阻止 TextWatcher 再次 record
-                                        et.setText(result)
-                                        viewModel.onUndoRedoApplied(result)
-                                    } finally {
-                                        viewModel.undoManager.finishUndoRedo()
-                                    }
-                                }
-                            },
-                            enabled = viewModel.canUndo
-                        ) {
-                            Icon(Icons.Filled.Undo, contentDescription = "撤销")
-                        }
-                        // [Bug #5 修复] 重做：操作完成后同步 ViewModel 状态
-                        IconButton(
-                            onClick = {
-                                val et = editTextRef.value ?: return@IconButton
-                                val result = viewModel.undoManager.prepareRedo()
-                                if (result != null) {
-                                    try {
-                                        ignoreTextChange = true
-                                        et.setText(result)
-                                        viewModel.onUndoRedoApplied(result)
-                                    } finally {
-                                        viewModel.undoManager.finishUndoRedo()
-                                    }
-                                }
-                            },
-                            enabled = viewModel.canRedo
-                        ) {
-                            Icon(Icons.Filled.Redo, contentDescription = "重做")
-                        }
-                        // 保存
-                        IconButton(
-                            onClick = {
-                                if (currentUri != null) {
-                                    viewModel.saveFile()
-                                } else {
-                                    saveAsLauncher.launch("new_file.txt")
-                                }
-                            },
-                            enabled = isModified
-                        ) {
-                            Icon(Icons.Filled.Save, contentDescription = "保存")
-                        }
-                        // 更多操作（溢出菜单）
-                        Box {
-                            IconButton(onClick = { showOverflowMenu = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                    // [Bug #8 修复] 顶栏按钮包一层可横向滚动的 Row：
+                    // 打开文件后按钮较多，允许左右滑动访问全部按钮，避免顶栏拥挤
+                    Row(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isFileOpen) {
+                            // ── 文件已打开时的工具栏按钮 ──
+                            // 搜索切换
+                            IconButton(onClick = { viewModel.toggleSearch() }) {
+                                Icon(Icons.Filled.Search, contentDescription = "搜索")
                             }
-                            DropdownMenu(
-                                expanded = showOverflowMenu,
-                                onDismissRequest = { showOverflowMenu = false }
+                            // 保存
+                            IconButton(
+                                onClick = {
+                                    if (currentUri != null) {
+                                        viewModel.saveFile()
+                                    } else {
+                                        saveAsLauncher.launch("new_file.txt")
+                                    }
+                                },
+                                enabled = isModified
                             ) {
-                                // 复制行号
-                                DropdownMenuItem(
-                                    text = { Text("复制行号") },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val lines = content.lines()
-                                        val sb = StringBuilder(lines.size * 8)
-                                        for (i in lines.indices) sb.append(i + 1).append('\n')
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("行号", sb.trimEnd().toString()))
-                                    },
-                                    leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
-                                )
-                                // 跳转到行
-                                DropdownMenuItem(
-                                    text = { Text("跳转到行") },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        showGoToLineDialog = true
-                                    },
-                                    leadingIcon = { Icon(Icons.Filled.Numbers, contentDescription = null) }
-                                )
-                                // 设置
-                                DropdownMenuItem(
-                                    text = { Text("设置") },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        showSettingsDialog = true
-                                    },
-                                    leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) }
-                                )
+                                Icon(Icons.Filled.Save, contentDescription = "保存")
                             }
-                        }
-                    } else {
-                        // ── 无文件打开时的工具栏按钮 ──
-                        Row {
+                            // 更多操作（溢出菜单）
+                            Box {
+                                IconButton(onClick = { showOverflowMenu = true }) {
+                                    Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                                }
+                                DropdownMenu(
+                                    expanded = showOverflowMenu,
+                                    onDismissRequest = { showOverflowMenu = false }
+                                ) {
+                                    // 跳转到行
+                                    DropdownMenuItem(
+                                        text = { Text("跳转到行") },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showGoToLineDialog = true
+                                        },
+                                        leadingIcon = { Icon(Icons.Filled.Numbers, contentDescription = null) }
+                                    )
+                                    // 设置
+                                    DropdownMenuItem(
+                                        text = { Text("设置") },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showSettingsDialog = true
+                                        },
+                                        leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) }
+                                    )
+                                }
+                            }
+                        } else {
+                            // ── 无文件打开时的工具栏按钮 ──
                             IconButton(onClick = { showSettingsDialog = true }) {
                                 Icon(Icons.Filled.Settings, contentDescription = "设置")
                             }
@@ -321,11 +278,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         viewModel.searchNext()
                         scrollToSearchMatch()
                     },
-                    onClose = viewModel::dismissSearch,
-                    isCaseSensitive = isCaseSensitive,
-                    isWholeWord = isWholeWord,
-                    onToggleCaseSensitive = viewModel::toggleCaseSensitive,
-                    onToggleWholeWord = viewModel::toggleWholeWord
+                    onClose = viewModel::dismissSearch
                 )
             }
 
@@ -421,7 +374,6 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 et.clearFocus()
                                                 val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                                                 imm.hideSoftInputFromWindow(et.windowToken, 0)
-                                                isKeyboardVisible.value = false
                                                 true
                                             } else false
                                         }

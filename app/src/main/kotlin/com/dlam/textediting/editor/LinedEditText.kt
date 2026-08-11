@@ -9,10 +9,7 @@ import android.text.Spannable
 import android.text.style.BackgroundColorSpan
 import android.util.AttributeSet
 import android.view.Gravity
-import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import androidx.appcompat.widget.AppCompatEditText
 
 /**
@@ -222,10 +219,41 @@ class LinedEditText(
         setPadding(left, paddingTop, paddingRight, paddingBottom)
     }
 
+    /**
+     * 根据当前文件总行数更新行号栏宽度
+     *
+     * [Bug #8 修复] 在 onLayout（布局阶段）计算行号栏宽度并调整 padding，
+     * 避免在 onDraw（绘制阶段）修改 padding —— 绘制阶段改 padding 会触发
+     * requestLayout，导致本帧行号与文本错位，且行数位数变化时整视图反复重排抖动。
+     * 宽度只增不减（打开大文件后再打开小文件不缩窄），布局最多多执行一次后稳定。
+     */
+    private fun updateGutterWidth() {
+        if (!showLineNumbers) return
+        val l = layout ?: return
+        val digits = l.lineCount.toString().length
+        val needed = gutterMarginPx * 2 +
+                lineNumberPaint.measureText("0".repeat(digits))
+        if (needed > gutterWidthPx) {
+            gutterWidthPx = needed + 8f
+            recomputePadding()
+        }
+    }
+
     // ── 系统回调 ──
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
         super.onConfigurationChanged(newConfig)
+    }
+
+    /**
+     * 布局阶段更新行号栏宽度
+     *
+     * [Bug #8 修复] 行号栏宽度只在布局阶段计算（setText / 字体变化 / 尺寸变化都会触发
+     * onLayout），绘制阶段只读，保证滚动路径零测量零分配、无 requestLayout 抖动。
+     */
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        updateGutterWidth()
     }
 
     /** 滚动时更新行号和当前行高亮 */
@@ -246,29 +274,6 @@ class LinedEditText(
         } else {
             clearBracketSpans()               // 有选区时清除高亮
         }
-    }
-
-    /** 触摸时确保获得焦点并弹出键盘 */
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_DOWN) {
-            requestFocus()
-            if (!hasFocus()) {
-                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    /** 处理 Back 键：收起键盘 */
-    override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-            clearFocus()
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.hideSoftInputFromWindow(windowToken, 0)
-            return false
-        }
-        return super.onKeyPreIme(keyCode, event)
     }
 
     // ── 公共工具方法 ──
@@ -453,10 +458,9 @@ class LinedEditText(
     /**
      * 绘制行号栏
      *
-     * [Bug #2 修复] 移除了 `neededDigits > 5` 的错误限制条件，像素宽度不足就扩宽。
-     * [Bug #4 修复] baseline 计算改用 extendedPaddingTop。
-     * [Bug #7 修复] 宽度扩容在绘制路径内完成但不提前 return、不显式 requestLayout，
-     * 本帧即用新宽度绘制，配合 recomputePadding 触发的常规重排，避免闪帧与抖动。
+     * [Bug #8 修复] 行号栏宽度由 onLayout 阶段的 updateGutterWidth() 统一计算，
+     * 本函数只读 gutterWidthPx —— 绘制阶段零测量、零字符串分配、零宽度修改，
+     * 滚动路径保持常量开销，消除行号与文本错位及滞后。
      * 仅绘制可见行 ± 3 行缓冲区，大文件也保持常量开销。
      */
     private fun drawGutter(canvas: Canvas, layout: Layout, viewHeight: Int) {
@@ -466,20 +470,6 @@ class LinedEditText(
         val bottom = (viewHeight - extendedPaddingBottom).toFloat()
         val visibleHeight = bottom - top
         if (visibleHeight <= 0) return
-
-        // [Bug #2 修复] 只要像素宽度不足就扩宽（且只增不减）。
-        // [Bug #7 修复] 不再在绘制阶段提前 return 跳过行号，也不在这里 requestLayout：
-        // 原实现在 onDraw 内测量并扩容后直接 return，导致本帧"文本已画、行号缺失"的闪帧，
-        // 且每次行数位数变化都触发整视图重布局，造成行号栏抖动/跳动。
-        // 现在改在本帧用新宽度直接绘制，recomputePadding() 内部的 setPadding 会发起
-        // requestLayout + invalidate，交给常规布局流程做后续重排即可。
-        val maxLine = layout.lineCount
-        val neededGutter = gutterMarginPx * 2 +
-                lineNumberPaint.measureText("0".repeat(maxLine.toString().length))
-        if (neededGutter > gutterWidthPx) {
-            gutterWidthPx = neededGutter + 8f
-            recomputePadding()
-        }
 
         // 裁剪到行号栏区域
         canvas.save()
