@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
  * @param onToggleCaseSensitive 切换大小写敏感回调
  * @param onToggleWholeWord 切换全字匹配回调
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchBar(
     query: String,

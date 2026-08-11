@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
  * @param settings 设置管理器实例
  * @param onDismiss 关闭对话框回调
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsDialog(
     settings: com.dlam.textediting.SettingsManager,
